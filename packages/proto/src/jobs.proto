@@ -1,0 +1,104 @@
+syntax = "proto3";
+
+package vidforge.jobs.v1;
+
+import "common.proto";
+import "google/protobuf/timestamp.proto";
+
+// JobQueueService exposes queue introspection and webhook management.
+// The queue itself is BullMQ/Redis; this is the management plane.
+service JobQueueService {
+  rpc GetQueueStats(GetQueueStatsRequest) returns (QueueStats);
+
+  // Server-streaming firehose of job lifecycle events for an org.
+  // The gateway bridges this to SSE for the dashboard.
+  rpc StreamQueueEvents(StreamQueueEventsRequest) returns (stream QueueEvent);
+
+  rpc RegisterWebhook(RegisterWebhookRequest) returns (Webhook);
+  rpc ListWebhooks(ListWebhooksRequest) returns (ListWebhooksResponse);
+  rpc DeleteWebhook(DeleteWebhookRequest) returns (DeleteWebhookResponse);
+
+  rpc GetUsage(GetUsageRequest) returns (UsageReport);
+}
+
+message GetQueueStatsRequest {
+  vidforge.common.v1.RequestContext context = 1;
+}
+
+message QueueStats {
+  uint32 queued = 1;
+  uint32 active = 2;
+  uint32 completed_24h = 3;
+  uint32 failed_24h = 4;
+  float avg_wait_seconds = 5;
+  float avg_processing_seconds = 6;
+}
+
+message StreamQueueEventsRequest {
+  vidforge.common.v1.RequestContext context = 1;
+}
+
+enum QueueEventType {
+  QUEUE_EVENT_TYPE_UNSPECIFIED = 0;
+  QUEUE_EVENT_TYPE_ENQUEUED = 1;
+  QUEUE_EVENT_TYPE_STARTED = 2;
+  QUEUE_EVENT_TYPE_PROGRESS = 3;
+  QUEUE_EVENT_TYPE_COMPLETED = 4;
+  QUEUE_EVENT_TYPE_FAILED = 5;
+  QUEUE_EVENT_TYPE_RETRYING = 6;
+}
+
+message QueueEvent {
+  QueueEventType type = 1;
+  string job_id = 2;
+  string asset_id = 3;
+  float percent = 4;
+  string detail = 5;
+  google.protobuf.Timestamp occurred_at = 6;
+}
+
+message Webhook {
+  string webhook_id = 1;
+  string org_id = 2;
+  string url = 3;
+  repeated QueueEventType events = 4; // which events trigger delivery
+  string signing_secret_hint = 5;     // last 4 chars; full secret shown once
+  bool active = 6;
+}
+
+message RegisterWebhookRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  string url = 2;
+  repeated QueueEventType events = 3;
+}
+
+message ListWebhooksRequest {
+  vidforge.common.v1.RequestContext context = 1;
+}
+
+message ListWebhooksResponse {
+  repeated Webhook webhooks = 1;
+}
+
+message DeleteWebhookRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  string webhook_id = 2;
+}
+
+message DeleteWebhookResponse {
+  bool deleted = 1;
+}
+
+message GetUsageRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  google.protobuf.Timestamp from = 2;
+  google.protobuf.Timestamp to = 3;
+}
+
+message UsageReport {
+  string org_id = 1;
+  float transcode_minutes = 2;
+  uint64 storage_bytes = 3;
+  uint64 egress_bytes = 4;
+  uint32 jobs_completed = 5;
+}

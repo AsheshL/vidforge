@@ -1,0 +1,30 @@
+{
+  "name": "@vidforge/proto",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./gen/index.ts",
+    "./common": "./gen/common.ts",
+    "./video": "./gen/video.ts",
+    "./metadata": "./gen/metadata.ts",
+    "./auth": "./gen/auth.ts",
+    "./jobs": "./gen/jobs.ts"
+  },
+  "scripts": {
+    "proto:gen": "./scripts/generate.sh",
+    "build": "echo 'proto build is proto:gen'",
+    "lint": "buf lint src || true"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^2.12.0",
+    "@grpc/grpc-js": "^1.12.5",
+    "long": "^5.2.3",
+    "protobufjs": "^7.4.0"
+  },
+  "devDependencies": {
+    "grpc-tools": "^1.12.4",
+    "ts-proto": "^2.6.1",
+    "typescript": "^5.7.2"
+  }
+}

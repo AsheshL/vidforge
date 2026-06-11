@@ -1,0 +1,20 @@
+{
+  "name": "@vidforge/metadata-svc",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/main.ts",
+    "lint": "echo ok"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.12.5",
+    "@vidforge/db": "workspace:*",
+    "@vidforge/proto": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

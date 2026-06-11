@@ -1,0 +1,130 @@
+syntax = "proto3";
+
+package vidforge.metadata.v1;
+
+import "common.proto";
+import "google/protobuf/duration.proto";
+
+// MetadataService owns the asset catalog: assets, tags, collections,
+// and version history. Backed by Prisma + PostgreSQL.
+service MetadataService {
+  rpc CreateAsset(CreateAssetRequest) returns (Asset);
+  rpc GetAsset(GetAssetRequest) returns (Asset);
+  rpc UpdateAsset(UpdateAssetRequest) returns (Asset);
+  rpc DeleteAsset(DeleteAssetRequest) returns (DeleteAssetResponse);
+  rpc ListAssets(ListAssetsRequest) returns (ListAssetsResponse);
+
+  // Server-streaming so large result sets don't buffer in memory.
+  rpc SearchAssets(SearchAssetsRequest) returns (stream Asset);
+
+  rpc UpdateTags(UpdateTagsRequest) returns (Asset);
+
+  rpc CreateCollection(CreateCollectionRequest) returns (Collection);
+  rpc AddToCollection(AddToCollectionRequest) returns (Collection);
+}
+
+enum AssetStatus {
+  ASSET_STATUS_UNSPECIFIED = 0;
+  ASSET_STATUS_UPLOADING = 1;
+  ASSET_STATUS_UPLOADED = 2;
+  ASSET_STATUS_PROCESSING = 3;
+  ASSET_STATUS_READY = 4;
+  ASSET_STATUS_FAILED = 5;
+  ASSET_STATUS_ARCHIVED = 6;
+}
+
+message Asset {
+  string asset_id = 1;
+  string org_id = 2;
+  string title = 3;
+  string description = 4;
+  AssetStatus status = 5;
+  string source_storage_key = 6;
+  uint64 source_bytes = 7;
+  google.protobuf.Duration duration = 8;
+  uint32 source_width = 9;
+  uint32 source_height = 10;
+  repeated string tags = 11;
+  string playback_url = 12;     // master playlist URL once READY
+  string thumbnail_url = 13;
+  uint32 version = 14;
+  vidforge.common.v1.AuditInfo audit = 15;
+}
+
+message CreateAssetRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  string title = 2;
+  string description = 3;
+  repeated string tags = 4;
+}
+
+message GetAssetRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  string asset_id = 2;
+}
+
+message UpdateAssetRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  string asset_id = 2;
+  // Field-mask style: only set fields are applied.
+  optional string title = 3;
+  optional string description = 4;
+  optional AssetStatus status = 5;
+  optional string playback_url = 6;
+  optional string thumbnail_url = 7;
+}
+
+message DeleteAssetRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  string asset_id = 2;
+  bool hard_delete = 3; // default soft-delete (ARCHIVED)
+}
+
+message DeleteAssetResponse {
+  bool deleted = 1;
+}
+
+message ListAssetsRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  vidforge.common.v1.PageRequest page = 2;
+  AssetStatus status_filter = 3;
+  string collection_id = 4;
+}
+
+message ListAssetsResponse {
+  repeated Asset assets = 1;
+  vidforge.common.v1.PageInfo page_info = 2;
+}
+
+message SearchAssetsRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  string query = 2;             // full-text over title/description/tags
+  repeated string tags = 3;     // AND filter
+  uint32 limit = 4;
+}
+
+message UpdateTagsRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  string asset_id = 2;
+  repeated string add = 3;
+  repeated string remove = 4;
+}
+
+message Collection {
+  string collection_id = 1;
+  string org_id = 2;
+  string name = 3;
+  repeated string asset_ids = 4;
+  vidforge.common.v1.AuditInfo audit = 5;
+}
+
+message CreateCollectionRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  string name = 2;
+}
+
+message AddToCollectionRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  string collection_id = 2;
+  repeated string asset_ids = 3;
+}

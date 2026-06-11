@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package vidforge.common.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Shared pagination request, used by all list/search RPCs.
+message PageRequest {
+  uint32 page_size = 1;  // max 100, server clamps
+  string page_token = 2; // opaque cursor from previous response
+}
+
+message PageInfo {
+  string next_page_token = 1; // empty when no more pages
+  uint64 total_count = 2;
+}
+
+// Caller identity, propagated by the gateway after auth.
+// The gateway HMAC-signs the identity fields; services reject
+// contexts whose signature does not verify or that are stale.
+message RequestContext {
+  string user_id = 1;
+  string org_id = 2;
+  repeated string roles = 3;
+  string trace_id = 4;
+  // Unix epoch milliseconds when the gateway signed this context.
+  int64 issued_at_ms = 5;
+  // hex HMAC-SHA256 over the identity fields + issued_at_ms.
+  string signature = 6;
+}
+
+message AuditInfo {
+  google.protobuf.Timestamp created_at = 1;
+  google.protobuf.Timestamp updated_at = 2;
+  string created_by = 3;
+}

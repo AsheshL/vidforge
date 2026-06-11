@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.next/
+.turbo/
+.env
+.env.local
+packages/proto/gen/
+packages/db/node_modules/.prisma/
+*.log
+.DS_Store

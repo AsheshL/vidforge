@@ -1,0 +1,18 @@
+{
+  "name": "@vidforge/queue",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "echo ok"
+  },
+  "dependencies": {
+    "bullmq": "^5.34.8",
+    "ioredis": "^5.4.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}

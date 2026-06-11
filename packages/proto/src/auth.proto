@@ -1,0 +1,186 @@
+syntax = "proto3";
+
+package vidforge.auth.v1;
+
+import "common.proto";
+import "google/protobuf/timestamp.proto";
+
+// AuthService owns identity: users, orgs, roles, API keys, audit log.
+// The gateway calls VerifyToken on every request and forwards the
+// resulting RequestContext to downstream services.
+service AuthService {
+  rpc VerifyToken(VerifyTokenRequest) returns (VerifyTokenResponse);
+
+  // Self-service: creates a new org with the caller as its OWNER.
+  rpc SignUp(SignUpRequest) returns (SessionResponse);
+  rpc Login(LoginRequest) returns (SessionResponse);
+
+  // ADMIN+: adds a user to the caller's org with an emailed temporary
+  // password. Re-inviting a user still on a temporary password rotates it.
+  rpc InviteUser(InviteUserRequest) returns (User);
+
+  // Verifies the current (or temporary) password and sets a new one,
+  // clearing any must-change flag. Returns a fresh session.
+  rpc ChangePassword(ChangePasswordRequest) returns (SessionResponse);
+
+  // Dev-only: issues a JWT for a seeded account by email, no password.
+  // The service refuses this RPC when NODE_ENV=production.
+  rpc IssueDevToken(IssueDevTokenRequest) returns (IssueDevTokenResponse);
+  rpc CreateApiKey(CreateApiKeyRequest) returns (CreateApiKeyResponse);
+  rpc RevokeApiKey(RevokeApiKeyRequest) returns (RevokeApiKeyResponse);
+
+  rpc GetUser(GetUserRequest) returns (User);
+  rpc ListOrgMembers(ListOrgMembersRequest) returns (ListOrgMembersResponse);
+  rpc AssignRole(AssignRoleRequest) returns (User);
+
+  rpc RecordAuditEvent(RecordAuditEventRequest) returns (RecordAuditEventResponse);
+  rpc ListAuditEvents(ListAuditEventsRequest) returns (ListAuditEventsResponse);
+}
+
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  ROLE_VIEWER = 1;
+  ROLE_EDITOR = 2;
+  ROLE_ADMIN = 3;
+  ROLE_OWNER = 4;
+}
+
+message User {
+  string user_id = 1;
+  string email = 2;
+  string display_name = 3;
+  string org_id = 4;
+  Role role = 5;
+  vidforge.common.v1.AuditInfo audit = 6;
+}
+
+message VerifyTokenRequest {
+  string token = 1; // JWT or API key
+}
+
+message VerifyTokenResponse {
+  bool valid = 1;
+  vidforge.common.v1.RequestContext context = 2;
+  google.protobuf.Timestamp expires_at = 3;
+}
+
+message SignUpRequest {
+  string email = 1;
+  string password = 2;
+  string display_name = 3;
+  string org_name = 4; // defaults to "<display_name>'s org"
+}
+
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message SessionResponse {
+  string token = 1;
+  User user = 2;
+  google.protobuf.Timestamp expires_at = 3;
+  // Set on Login when the account holds a temporary password. token is
+  // empty; the only permitted next step is ChangePassword.
+  bool password_change_required = 4;
+}
+
+message InviteUserRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  string email = 2;
+  string display_name = 3;
+  Role role = 4; // capped at the inviter's own role
+}
+
+message ChangePasswordRequest {
+  string email = 1;
+  string current_password = 2;
+  string new_password = 3;
+}
+
+message IssueDevTokenRequest {
+  string email = 1;
+}
+
+message IssueDevTokenResponse {
+  string token = 1;
+  User user = 2;
+  google.protobuf.Timestamp expires_at = 3;
+}
+
+message CreateApiKeyRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  string name = 2;
+  Role role = 3; // key cannot exceed creator's role
+  google.protobuf.Timestamp expires_at = 4;
+}
+
+message CreateApiKeyResponse {
+  string key_id = 1;
+  string secret = 2; // shown once, only a hash is stored
+}
+
+message RevokeApiKeyRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  string key_id = 2;
+}
+
+message RevokeApiKeyResponse {
+  bool revoked = 1;
+}
+
+message GetUserRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  string user_id = 2;
+}
+
+message ListOrgMembersRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  vidforge.common.v1.PageRequest page = 2;
+}
+
+message ListOrgMembersResponse {
+  repeated User users = 1;
+  vidforge.common.v1.PageInfo page_info = 2;
+}
+
+message AssignRoleRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  string user_id = 2;
+  Role role = 3;
+}
+
+message RecordAuditEventRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  string action = 2;        // "asset.delete", "job.submit", ...
+  string resource_type = 3;
+  string resource_id = 4;
+  string detail_json = 5;
+}
+
+message RecordAuditEventResponse {
+  string event_id = 1;
+}
+
+message ListAuditEventsRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  vidforge.common.v1.PageRequest page = 2;
+  string resource_type = 3; // optional filter
+  string actor_user_id = 4; // optional filter
+}
+
+message AuditEvent {
+  string event_id = 1;
+  string org_id = 2;
+  string actor_user_id = 3;
+  string action = 4;
+  string resource_type = 5;
+  string resource_id = 6;
+  string detail_json = 7;
+  google.protobuf.Timestamp occurred_at = 8;
+}
+
+message ListAuditEventsResponse {
+  repeated AuditEvent events = 1;
+  vidforge.common.v1.PageInfo page_info = 2;
+}

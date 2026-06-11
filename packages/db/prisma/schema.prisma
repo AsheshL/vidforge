@@ -1,0 +1,175 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  VIEWER
+  EDITOR
+  ADMIN
+  OWNER
+}
+
+enum AssetStatus {
+  UPLOADING
+  UPLOADED
+  PROCESSING
+  READY
+  FAILED
+  ARCHIVED
+}
+
+enum JobState {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model Org {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  users     User[]
+  assets    Asset[]
+  apiKeys   ApiKey[]
+  webhooks  Webhook[]
+  auditLog  AuditEvent[]
+}
+
+model User {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  displayName String
+  // scrypt hash; null for dev-seeded accounts (IssueDevToken only)
+  passwordHash String?
+  // true while the user is on an invite's temporary password; login then
+  // only permits a password change, and verifyToken rejects any session.
+  mustChangePassword Boolean   @default(false)
+  // when the temporary password stops being accepted
+  passwordExpiresAt  DateTime?
+  role        Role     @default(VIEWER)
+  orgId       String
+  org         Org      @relation(fields: [orgId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([orgId])
+}
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  name       String
+  secretHash String
+  role       Role
+  orgId      String
+  org        Org       @relation(fields: [orgId], references: [id])
+  createdBy  String
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([orgId])
+}
+
+model Asset {
+  id               String         @id @default(cuid())
+  orgId            String
+  org              Org            @relation(fields: [orgId], references: [id])
+  title            String
+  description      String         @default("")
+  status           AssetStatus    @default(UPLOADING)
+  sourceStorageKey String?
+  sourceBytes      BigInt?
+  durationSeconds  Float?
+  sourceWidth      Int?
+  sourceHeight     Int?
+  tags             String[]
+  playbackUrl      String?
+  thumbnailUrl     String?
+  version          Int            @default(1)
+  createdBy        String
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  jobs             TranscodeJob[]
+  collections      CollectionAsset[]
+
+  @@index([orgId, status])
+  @@index([orgId, createdAt])
+}
+
+model TranscodeJob {
+  id              String    @id @default(cuid())
+  assetId         String
+  asset           Asset     @relation(fields: [assetId], references: [id])
+  orgId           String
+  // null on rows that predate per-user ownership; only ADMIN+ may delete those
+  createdByUserId String?
+  state           JobState  @default(QUEUED)
+  profileJson     Json      // TranscodeProfile proto as JSON
+  priority        Int       @default(0)
+  progressPercent Float     @default(0)
+  errorMessage    String?
+  idempotencyKey  String?   @unique
+  manifestJson    Json?     // OutputManifest proto as JSON once complete
+  submittedAt     DateTime  @default(now())
+  startedAt       DateTime?
+  finishedAt      DateTime?
+
+  @@index([orgId, state])
+  @@index([assetId])
+}
+
+model Collection {
+  id        String            @id @default(cuid())
+  orgId     String
+  name      String
+  createdBy String
+  createdAt DateTime          @default(now())
+  assets    CollectionAsset[]
+
+  @@index([orgId])
+}
+
+model CollectionAsset {
+  collectionId String
+  assetId      String
+  collection   Collection @relation(fields: [collectionId], references: [id])
+  asset        Asset      @relation(fields: [assetId], references: [id])
+  addedAt      DateTime   @default(now())
+
+  @@id([collectionId, assetId])
+}
+
+model Webhook {
+  id            String    @id @default(cuid())
+  orgId         String
+  org           Org       @relation(fields: [orgId], references: [id])
+  url           String
+  events        String[]  // QueueEventType names
+  signingSecret String
+  active        Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+
+  @@index([orgId])
+}
+
+model AuditEvent {
+  id           String   @id @default(cuid())
+  orgId        String
+  org          Org      @relation(fields: [orgId], references: [id])
+  actorUserId  String
+  action       String
+  resourceType String
+  resourceId   String
+  detailJson   Json?
+  occurredAt   DateTime @default(now())
+
+  @@index([orgId, occurredAt])
+  @@index([orgId, resourceType])
+}

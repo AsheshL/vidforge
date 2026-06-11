@@ -1,0 +1,34 @@
+{
+  "name": "@vidforge/api-gateway",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/main.ts",
+    "lint": "echo ok",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1065.0",
+    "@aws-sdk/lib-storage": "^3.1065.0",
+    "@aws-sdk/s3-request-presigner": "^3.1066.0",
+    "@fastify/cors": "^11.2.0",
+    "@fastify/rate-limit": "^11.0.0",
+    "@grpc/grpc-js": "^1.12.5",
+    "@tus/s3-store": "^2.0.4",
+    "@tus/server": "^2.4.1",
+    "@vidforge/db": "workspace:^",
+    "@vidforge/proto": "workspace:*",
+    "@vidforge/svc-auth": "workspace:^",
+    "fastify": "^5.2.1",
+    "fluent-ffmpeg": "^2.1.3",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/fluent-ffmpeg": "^2.1.27",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^1.6.1"
+  }
+}

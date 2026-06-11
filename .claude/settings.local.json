@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__visualize__read_me",
+      "mcp__visualize__show_widget",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(pnpm proto:gen)",
+      "Bash(pnpm --filter @vidforge/svc-auth add -D @types/node@^18)",
+      "Bash(./node_modules/.bin/tsc -p tsconfig.json --noEmit)"
+    ]
+  }
+}

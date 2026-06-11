@@ -1,0 +1,182 @@
+syntax = "proto3";
+
+package vidforge.video.v1;
+
+import "common.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+
+// VideoService owns transcoding. It accepts jobs, streams progress,
+// and reports output manifests. Heavy lifting happens in BullMQ
+// workers running fluent-ffmpeg; this service is the gRPC front door.
+service VideoService {
+  rpc SubmitTranscodeJob(SubmitTranscodeJobRequest) returns (SubmitTranscodeJobResponse);
+  rpc GetJob(GetJobRequest) returns (TranscodeJob);
+  rpc CancelJob(CancelJobRequest) returns (TranscodeJob);
+
+  // Removes a terminal job. Only the job's creator (or ADMIN+) may delete.
+  rpc DeleteJob(DeleteJobRequest) returns (DeleteJobResponse);
+  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
+
+  // Server-streaming: emits an event on every progress tick until the
+  // job reaches a terminal state, then closes the stream.
+  rpc StreamProgress(StreamProgressRequest) returns (stream ProgressEvent);
+
+  rpc GetOutputManifest(GetOutputManifestRequest) returns (OutputManifest);
+  rpc GenerateThumbnails(GenerateThumbnailsRequest) returns (SubmitTranscodeJobResponse);
+}
+
+enum JobState {
+  JOB_STATE_UNSPECIFIED = 0;
+  JOB_STATE_QUEUED = 1;
+  JOB_STATE_PROCESSING = 2;
+  JOB_STATE_COMPLETED = 3;
+  JOB_STATE_FAILED = 4;
+  JOB_STATE_CANCELLED = 5;
+}
+
+enum VideoCodec {
+  VIDEO_CODEC_UNSPECIFIED = 0;
+  VIDEO_CODEC_H264 = 1;
+  VIDEO_CODEC_H265 = 2;
+  VIDEO_CODEC_VP9 = 3;
+  VIDEO_CODEC_AV1 = 4;
+}
+
+enum AudioCodec {
+  AUDIO_CODEC_UNSPECIFIED = 0;
+  AUDIO_CODEC_AAC = 1;
+  AUDIO_CODEC_OPUS = 2;
+}
+
+enum PackagingFormat {
+  PACKAGING_FORMAT_UNSPECIFIED = 0;
+  PACKAGING_FORMAT_HLS = 1;
+  PACKAGING_FORMAT_DASH = 2;
+  PACKAGING_FORMAT_MP4 = 3;
+}
+
+// One output rendition, e.g. 1080p H.264 at 5 Mbps.
+message RenditionProfile {
+  string name = 1; // "1080p", "720p", ...
+  uint32 width = 2;
+  uint32 height = 3;
+  uint32 video_bitrate_kbps = 4;
+  uint32 audio_bitrate_kbps = 5;
+  VideoCodec video_codec = 6;
+  AudioCodec audio_codec = 7;
+  float framerate = 8; // 0 = keep source
+}
+
+message TranscodeProfile {
+  repeated RenditionProfile renditions = 1;
+  PackagingFormat packaging = 2;
+  uint32 hls_segment_seconds = 3; // default 6
+  bool generate_thumbnails = 4;
+  uint32 thumbnail_interval_seconds = 5;
+  string burn_in_subtitle_asset_id = 6; // optional subtitle track to burn in
+}
+
+message SubmitTranscodeJobRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  string asset_id = 2;          // metadata-svc asset owning the source file
+  string source_storage_key = 3; // object storage key of the raw upload
+  TranscodeProfile profile = 4;
+  uint32 priority = 5;           // 0 = default; higher runs sooner
+  string idempotency_key = 6;
+}
+
+message SubmitTranscodeJobResponse {
+  string job_id = 1;
+  JobState state = 2;
+}
+
+message GetJobRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  string job_id = 2;
+}
+
+message CancelJobRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  string job_id = 2;
+}
+
+message DeleteJobRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  string job_id = 2;
+}
+
+message DeleteJobResponse {
+  bool deleted = 1;
+}
+
+message ListJobsRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  vidforge.common.v1.PageRequest page = 2;
+  string asset_id = 3;          // optional filter
+  JobState state_filter = 4;    // optional filter
+}
+
+message ListJobsResponse {
+  repeated TranscodeJob jobs = 1;
+  vidforge.common.v1.PageInfo page_info = 2;
+}
+
+message TranscodeJob {
+  string job_id = 1;
+  string asset_id = 2;
+  string org_id = 3;
+  JobState state = 4;
+  TranscodeProfile profile = 5;
+  float progress_percent = 6;
+  string error_message = 7;
+  google.protobuf.Timestamp submitted_at = 8;
+  google.protobuf.Timestamp started_at = 9;
+  google.protobuf.Timestamp finished_at = 10;
+  string created_by_user_id = 11;
+}
+
+message StreamProgressRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  string job_id = 2;
+}
+
+message ProgressEvent {
+  string job_id = 1;
+  JobState state = 2;
+  float percent = 3;
+  string current_rendition = 4;    // which rendition ffmpeg is on
+  float fps = 5;                   // ffmpeg processing speed
+  google.protobuf.Duration eta = 6;
+  google.protobuf.Timestamp emitted_at = 7;
+}
+
+message GetOutputManifestRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  string job_id = 2;
+}
+
+message OutputManifest {
+  string job_id = 1;
+  string asset_id = 2;
+  PackagingFormat packaging = 3;
+  string playlist_storage_key = 4; // master .m3u8 / .mpd key
+  repeated OutputRendition renditions = 5;
+  repeated string thumbnail_storage_keys = 6;
+  google.protobuf.Duration source_duration = 7;
+}
+
+message OutputRendition {
+  RenditionProfile profile = 1;
+  string storage_key_prefix = 2; // prefix for this rendition's segments
+  uint64 total_bytes = 3;
+}
+
+message GenerateThumbnailsRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  string asset_id = 2;
+  string source_storage_key = 3;
+  uint32 count = 4;             // evenly spaced; or use interval
+  uint32 interval_seconds = 5;
+  uint32 width = 6;
+}
