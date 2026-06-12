@@ -13,6 +13,20 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: vidforge
+          POSTGRES_PASSWORD: vidforge
+          POSTGRES_DB: shadow
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -32,6 +46,13 @@ jobs:
 
       - name: Generate Prisma client
         run: pnpm db:generate
+
+      # Fails if schema.prisma has changes not captured in a migration,
+      # so `db push` drift can't reach main.
+      - name: Check migration drift
+        run: pnpm db:drift-check
+        env:
+          SHADOW_DATABASE_URL: postgresql://vidforge:vidforge@localhost:5432/shadow
 
       - name: Lint
         run: pnpm lint

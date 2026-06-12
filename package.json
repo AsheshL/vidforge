@@ -8,6 +8,8 @@
     "lint": "turbo lint",
     "proto:gen": "turbo proto:gen",
     "db:migrate": "pnpm --filter @vidforge/db db:migrate",
+    "db:deploy": "pnpm --filter @vidforge/db db:deploy",
+    "db:drift-check": "pnpm --filter @vidforge/db db:drift-check",
     "db:generate": "pnpm --filter @vidforge/db db:generate",
     "test": "turbo test",
     "typecheck": "turbo typecheck"
