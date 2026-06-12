@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint || echo ok",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "hls.js": "^1.6.16",

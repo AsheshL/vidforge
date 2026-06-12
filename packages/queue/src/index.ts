@@ -1,5 +1,5 @@
 import { Queue, Worker, type Processor } from "bullmq";
-import IORedis from "ioredis";
+import { Redis as IORedis } from "ioredis";
 
 export const TRANSCODE_QUEUE = "transcode";
 export const WEBHOOK_QUEUE = "webhook-dispatch";

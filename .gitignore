@@ -8,3 +8,4 @@ packages/proto/gen/
 packages/db/node_modules/.prisma/
 *.log
 .DS_Store
+*.tsbuildinfo

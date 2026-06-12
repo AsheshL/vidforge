@@ -11,7 +11,7 @@ PROTOC_GEN_TS_PROTO="$(pnpm bin)/protoc-gen-ts_proto"
 npx grpc_tools_node_protoc \
   --plugin=protoc-gen-ts_proto="$PROTOC_GEN_TS_PROTO" \
   --ts_proto_out=gen \
-  --ts_proto_opt=outputServices=grpc-js,env=node,esModuleInterop=true,useDate=true,outputIndex=true \
+  --ts_proto_opt=outputServices=grpc-js,env=node,esModuleInterop=true,useDate=true,outputIndex=true,importSuffix=.js \
   --proto_path=src \
   src/*.proto
 

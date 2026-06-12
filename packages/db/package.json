@@ -9,12 +9,14 @@
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
     "build": "prisma generate",
-    "lint": "echo ok"
+    "lint": "echo ok",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@prisma/client": "^6.2.1"
   },
   "devDependencies": {
+    "@types/node": "^18",
     "prisma": "^6.2.1"
   }
 }

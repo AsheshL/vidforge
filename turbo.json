@@ -3,7 +3,9 @@
   "tasks": {
     "proto:gen": {
       "inputs": [
-        "src/**/*.proto"
+        "src/**/*.proto",
+        "scripts/generate.sh",
+        "package.json"
       ],
       "outputs": [
         "gen/**"
@@ -31,6 +33,12 @@
     "test": {
       "dependsOn": [
         "^proto:gen"
+      ]
+    },
+    "typecheck": {
+      "dependsOn": [
+        "^proto:gen",
+        "^build"
       ]
     }
   }

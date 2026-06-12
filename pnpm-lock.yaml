@@ -215,6 +215,9 @@ importers:
         specifier: ^6.2.1
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
     devDependencies:
+      '@types/node':
+        specifier: ^18
+        version: 18.19.130
       prisma:
         specifier: ^6.2.1
         version: 6.19.3(typescript@5.9.3)
@@ -250,9 +253,12 @@ importers:
         specifier: ^5.34.8
         version: 5.78.0
       ioredis:
-        specifier: ^5.4.2
-        version: 5.11.1
+        specifier: ^5.10.1
+        version: 5.10.1
     devDependencies:
+      '@types/node':
+        specifier: ^18
+        version: 18.19.130
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
@@ -3260,7 +3266,8 @@ snapshots:
   '@img/sharp-win32-x64@0.34.5':
     optional: true
 
-  '@ioredis/commands@1.10.0': {}
+  '@ioredis/commands@1.10.0':
+    optional: true
 
   '@ioredis/commands@1.5.1': {}
 
@@ -3827,7 +3834,8 @@ snapshots:
       strip-ansi: 6.0.1
       wrap-ansi: 7.0.0
 
-  cluster-key-slot@1.1.1: {}
+  cluster-key-slot@1.1.1:
+    optional: true
 
   cluster-key-slot@1.1.2: {}
 
@@ -4161,6 +4169,7 @@ snapshots:
       standard-as-callback: 2.1.0
     transitivePeerDependencies:
       - supports-color
+    optional: true
 
   ipaddr.js@2.4.0: {}
 
