@@ -3,6 +3,8 @@ import { Redis as IORedis } from "ioredis";
 
 export const TRANSCODE_QUEUE = "transcode";
 export const WEBHOOK_QUEUE = "webhook-dispatch";
+// Pub/sub channel carrying job ids whose in-flight transcode should be killed.
+export const TRANSCODE_CANCEL_CHANNEL = "transcode:cancel";
 
 export interface TranscodeJobData {
   jobId: string; // Postgres TranscodeJob.id

@@ -1,7 +1,13 @@
 import { status, type ServiceError } from "@grpc/grpc-js";
 import { QueueEvents } from "bullmq";
 import { prisma, JobState as DbJobState } from "@vidforge/db";
-import { createRedis, createTranscodeQueue, TRANSCODE_QUEUE } from "@vidforge/queue";
+import {
+  createRedis,
+  createTranscodeQueue,
+  TRANSCODE_CANCEL_CHANNEL,
+  TRANSCODE_QUEUE,
+} from "@vidforge/queue";
+import { deletePrefix } from "./storage.js";
 import {
   JobState,
   type TranscodeJob as ProtoJob,
@@ -12,6 +18,7 @@ import { verifyContext } from "@vidforge/svc-auth";
 
 const queue = createTranscodeQueue();
 const queueEvents = new QueueEvents(TRANSCODE_QUEUE, { connection: createRedis() });
+const cancelPublisher = createRedis();
 
 function grpcError(code: status, message: string): ServiceError {
   return Object.assign(new Error(message), { code, details: message }) as ServiceError;
@@ -225,13 +232,15 @@ export const videoServiceImpl: VideoServiceServer = {
     if (row.state !== "QUEUED" && row.state !== "PROCESSING") {
       return callback(grpcError(status.FAILED_PRECONDITION, `job is already ${row.state.toLowerCase()}`));
     }
-    // Removing the BullMQ entry stops queued jobs outright; a job already
-    // processing finishes its current run but the row stays CANCELLED.
+    // Removing the BullMQ entry stops queued jobs outright; for a job
+    // already processing, the pub/sub message tells the worker holding it
+    // to kill its ffmpeg processes.
     await queue.remove(row.id).catch(() => {});
     const updated = await prisma.transcodeJob.update({
       where: { id: row.id },
       data: { state: "CANCELLED", finishedAt: new Date() },
     });
+    await cancelPublisher.publish(TRANSCODE_CANCEL_CHANNEL, row.id);
     callback(null, toProtoJob(updated));
   },
 
@@ -248,6 +257,9 @@ export const videoServiceImpl: VideoServiceServer = {
     if (row.state === "QUEUED" || row.state === "PROCESSING") {
       return callback(grpcError(status.FAILED_PRECONDITION, "cancel the job before deleting it"));
     }
+    // Remove the HLS output before the row: if the S3 delete fails the job
+    // stays visible and can be retried, so nothing is orphaned.
+    await deletePrefix(`processed/${row.id}/`);
     await prisma.transcodeJob.delete({ where: { id: row.id } });
     callback(null, { deleted: true });
   },
@@ -255,17 +267,30 @@ export const videoServiceImpl: VideoServiceServer = {
   listJobs: async (call, callback) => {
     const ctx = authenticate(call.request.context);
     if (ctx instanceof Error) return callback(ctx);
-    const rows = await prisma.transcodeJob.findMany({
-      where: {
-        orgId: ctx.orgId,
-        ...(call.request.assetId ? { assetId: call.request.assetId } : {}),
-      },
-      orderBy: { submittedAt: "desc" },
-      take: Math.min(call.request.page?.pageSize || 20, 100),
-    });
+    const where = {
+      orgId: ctx.orgId,
+      ...(call.request.assetId ? { assetId: call.request.assetId } : {}),
+    };
+    const pageSize = Math.min(call.request.page?.pageSize || 20, 100);
+    const pageToken = call.request.page?.pageToken || undefined;
+    // Cursor pagination keyed on the previous page's last job id. The id
+    // tiebreaker makes the (submittedAt, id) ordering total, so the cursor
+    // is stable even when jobs share a timestamp.
+    const [rows, totalCount] = await Promise.all([
+      prisma.transcodeJob.findMany({
+        where,
+        orderBy: [{ submittedAt: "desc" }, { id: "desc" }],
+        take: pageSize,
+        ...(pageToken ? { cursor: { id: pageToken }, skip: 1 } : {}),
+      }),
+      prisma.transcodeJob.count({ where }),
+    ]);
     callback(null, {
       jobs: rows.map(toProtoJob),
-      pageInfo: { nextPageToken: "", totalCount: rows.length },
+      pageInfo: {
+        nextPageToken: rows.length === pageSize ? rows[rows.length - 1].id : "",
+        totalCount,
+      },
     });
   },
 

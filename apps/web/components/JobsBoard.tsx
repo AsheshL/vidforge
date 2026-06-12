@@ -19,6 +19,8 @@ export function JobsBoard() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [pageInfo, setPageInfo] = useState({ nextPageToken: "", totalCount: 0 });
+  const [loadingMore, setLoadingMore] = useState(false);
   // Live progress per jobId, layered over the polled job list.
   const [live, setLive] = useState<Record<string, ProgressEvent>>({});
   const sources = useRef<Map<string, EventSource>>(new Map());
@@ -29,7 +31,7 @@ export function JobsBoard() {
       setJobs([]);
       return;
     }
-    const res = await fetch(`${GATEWAY_URL}/v1/jobs`, {
+    const res = await fetch(`${GATEWAY_URL}/v1/jobs?pageSize=20`, {
       cache: "no-store",
       headers: authHeaders(),
     });
@@ -37,8 +39,27 @@ export function JobsBoard() {
     if (res.ok) {
       const data = await res.json();
       setJobs(data.jobs ?? []);
+      setPageInfo(data.pageInfo ?? { nextPageToken: "", totalCount: 0 });
     }
   }, []);
+
+  async function loadMore() {
+    if (!pageInfo.nextPageToken || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetch(
+        `${GATEWAY_URL}/v1/jobs?pageSize=20&pageToken=${encodeURIComponent(pageInfo.nextPageToken)}`,
+        { cache: "no-store", headers: authHeaders() },
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setJobs((prev) => [...prev, ...(data.jobs ?? [])]);
+        setPageInfo(data.pageInfo ?? { nextPageToken: "", totalCount: 0 });
+      }
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   useEffect(() => void refresh(), [refresh]);
 
@@ -114,7 +135,14 @@ export function JobsBoard() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">Transcode jobs</h2>
+        <h2 className="text-lg font-medium">
+          Transcode jobs
+          {pageInfo.totalCount > 0 && (
+            <span className="ml-2 text-sm font-normal text-slate-500">
+              {jobs.length} of {pageInfo.totalCount}
+            </span>
+          )}
+        </h2>
         <div className="flex gap-2">
           <button
             onClick={() => void refresh()}
@@ -224,6 +252,16 @@ export function JobsBoard() {
           </tbody>
         </table>
       </div>
+
+      {pageInfo.nextPageToken && (
+        <button
+          onClick={() => void loadMore()}
+          disabled={loadingMore}
+          className="self-center rounded-md border border-slate-700 px-4 py-1.5 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-50"
+        >
+          {loadingMore ? "Loading…" : "Load more"}
+        </button>
+      )}
     </div>
   );
 }

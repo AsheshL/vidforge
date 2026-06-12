@@ -28,6 +28,31 @@ export interface TranscodeResult {
 
 export type ProgressFn = (percent: number, rendition: string, fps: number) => void;
 
+export class CancelledError extends Error {
+  constructor() {
+    super("transcode cancelled");
+    this.name = "CancelledError";
+  }
+}
+
+// Lets the worker kill whichever ffmpeg process a job is currently running.
+// Each ffmpeg invocation registers its killer; cancel() fires the current
+// one and marks the token so later stages never start.
+export class CancelToken {
+  cancelled = false;
+  private killer: (() => void) | null = null;
+
+  cancel() {
+    this.cancelled = true;
+    this.killer?.();
+  }
+
+  register(kill: () => void) {
+    this.killer = kill;
+    if (this.cancelled) kill();
+  }
+}
+
 function probeDuration(path: string): Promise<number> {
   return new Promise((resolve, reject) => {
     ffmpeg.ffprobe(path, (err, data) => {
@@ -44,9 +69,10 @@ function transcodeRendition(
   segmentSeconds: number,
   durationSeconds: number,
   onProgress: ProgressFn,
+  token: CancelToken,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    ffmpeg(source)
+    const cmd = ffmpeg(source)
       .videoCodec("libx264")
       .audioCodec("aac")
       .size(`${r.width}x${r.height}`)
@@ -69,8 +95,9 @@ function transcodeRendition(
         onProgress(percent, r.name, p.currentFps ?? 0);
       })
       .on("end", () => resolve())
-      .on("error", reject)
-      .run();
+      .on("error", (err) => reject(token.cancelled ? new CancelledError() : err));
+    token.register(() => cmd.kill("SIGKILL"));
+    cmd.run();
   });
 }
 
@@ -78,14 +105,16 @@ function extractThumbnails(
   source: string,
   outDir: string,
   intervalSeconds: number,
+  token: CancelToken,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    ffmpeg(source)
+    const cmd = ffmpeg(source)
       .outputOptions([`-vf fps=1/${intervalSeconds},scale=320:-1`, "-q:v 4"])
       .output(join(outDir, "thumb_%04d.jpg"))
       .on("end", () => resolve())
-      .on("error", reject)
-      .run();
+      .on("error", (err) => reject(token.cancelled ? new CancelledError() : err));
+    token.register(() => cmd.kill("SIGKILL"));
+    cmd.run();
   });
 }
 
@@ -106,6 +135,7 @@ export async function runTranscode(
   sourceStorageKey: string,
   profile: TranscodeProfileJson,
   onProgress: ProgressFn,
+  token = new CancelToken(),
 ): Promise<TranscodeResult> {
   const work = join(tmpdir(), `vidforge-${jobId}`);
   const sourcePath = join(work, "source");
@@ -119,19 +149,28 @@ export async function runTranscode(
 
     const total = profile.renditions.length;
     for (let i = 0; i < total; i++) {
+      if (token.cancelled) throw new CancelledError();
       const r = profile.renditions[i];
       const dir = join(outRoot, r.name);
       await mkdir(dir, { recursive: true });
-      await transcodeRendition(sourcePath, dir, r, segmentSeconds, duration, (pct, name, fps) =>
-        // Scale per-rendition progress into overall job progress.
-        onProgress((i / total) * 100 + pct / total, name, fps),
+      await transcodeRendition(
+        sourcePath,
+        dir,
+        r,
+        segmentSeconds,
+        duration,
+        (pct, name, fps) =>
+          // Scale per-rendition progress into overall job progress.
+          onProgress((i / total) * 100 + pct / total, name, fps),
+        token,
       );
     }
 
     if (profile.generateThumbnails) {
+      if (token.cancelled) throw new CancelledError();
       const dir = join(outRoot, "thumbs");
       await mkdir(dir, { recursive: true });
-      await extractThumbnails(sourcePath, dir, profile.thumbnailIntervalSeconds ?? 10);
+      await extractThumbnails(sourcePath, dir, profile.thumbnailIntervalSeconds ?? 10, token);
     }
 
     const { writeFile } = await import("node:fs/promises");

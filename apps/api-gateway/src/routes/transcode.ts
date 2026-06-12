@@ -63,12 +63,17 @@ export function registerTranscodeRoutes(app: FastifyInstance, videoClient: Video
   });
 
   app.get("/v1/jobs", { preHandler: requireRole("VIEWER") }, async (req, reply) => {
-    const { assetId } = req.query as { assetId?: string };
+    const { assetId, pageSize, pageToken } = req.query as {
+      assetId?: string;
+      pageSize?: string;
+      pageToken?: string;
+    };
+    const size = Math.min(Math.max(Number(pageSize) || 50, 1), 100);
     return new Promise((resolve) => {
       videoClient.listJobs(
         {
           context: req.authContext!,
-          page: { pageSize: 50, pageToken: "" },
+          page: { pageSize: size, pageToken: pageToken ?? "" },
           assetId: assetId ?? "",
           stateFilter: 0,
         },

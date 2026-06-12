@@ -4,8 +4,10 @@ import { dirname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import {
   CreateBucketCommand,
+  DeleteObjectsCommand,
   GetObjectCommand,
   HeadBucketCommand,
+  ListObjectsV2Command,
   S3Client,
 } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
@@ -48,6 +50,24 @@ export async function uploadFile(localPath: string, key: string, contentType?: s
     },
   });
   await upload.done();
+}
+
+// Deletes every object under prefix. Returns the number of objects removed.
+export async function deletePrefix(prefix: string): Promise<number> {
+  let removed = 0;
+  let continuationToken: string | undefined;
+  do {
+    const page = await s3.send(
+      new ListObjectsV2Command({ Bucket: BUCKET, Prefix: prefix, ContinuationToken: continuationToken }),
+    );
+    const keys = (page.Contents ?? []).flatMap((o) => (o.Key ? [{ Key: o.Key }] : []));
+    if (keys.length > 0) {
+      await s3.send(new DeleteObjectsCommand({ Bucket: BUCKET, Delete: { Objects: keys } }));
+      removed += keys.length;
+    }
+    continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (continuationToken);
+  return removed;
 }
 
 const CONTENT_TYPES: Record<string, string> = {
