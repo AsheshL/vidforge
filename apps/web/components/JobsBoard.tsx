@@ -15,12 +15,35 @@ import { SeedButton } from "./SeedButton";
 
 const ACTIVE = (state: number) => state === 1 || state === 2;
 
+// Same-day timestamps read as "x min ago" / "x hours ago"; older ones get
+// the full date and time.
+function formatSubmitted(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) {
+    const mins = Math.max(0, Math.floor((now.getTime() - d.getTime()) / 60_000));
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins} min ago`;
+    const hours = Math.floor(mins / 60);
+    return hours === 1 ? "1 hour ago" : `${hours} hours ago`;
+  }
+  return d.toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
 export function JobsBoard() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [pageInfo, setPageInfo] = useState({ nextPageToken: "", totalCount: 0 });
   const [loadingMore, setLoadingMore] = useState(false);
+  const [assetTitles, setAssetTitles] = useState<Record<string, string>>({});
   // Live progress per jobId, layered over the polled job list.
   const [live, setLive] = useState<Record<string, ProgressEvent>>({});
   const sources = useRef<Map<string, EventSource>>(new Map());
@@ -40,6 +63,18 @@ export function JobsBoard() {
       const data = await res.json();
       setJobs(data.jobs ?? []);
       setPageInfo(data.pageInfo ?? { nextPageToken: "", totalCount: 0 });
+    }
+    const assetsRes = await fetch(`${GATEWAY_URL}/v1/assets`, {
+      cache: "no-store",
+      headers: authHeaders(),
+    });
+    if (assetsRes.ok) {
+      const data = await assetsRes.json();
+      setAssetTitles(
+        Object.fromEntries(
+          (data.assets ?? []).map((a: { assetId: string; title: string }) => [a.assetId, a.title]),
+        ),
+      );
     }
   }, []);
 
@@ -160,7 +195,6 @@ export function JobsBoard() {
         <table className="w-full text-sm">
           <thead className="bg-slate-900 text-left text-slate-400">
             <tr>
-              <th className="px-4 py-2.5 font-medium">Job</th>
               <th className="px-4 py-2.5 font-medium">Asset</th>
               <th className="px-4 py-2.5 font-medium">Status</th>
               <th className="px-4 py-2.5 font-medium w-64">Progress</th>
@@ -171,7 +205,7 @@ export function JobsBoard() {
           <tbody className="divide-y divide-slate-800">
             {jobs.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
                   {authed === false
                     ? "Sign in to see your jobs."
                     : "No jobs yet — seed a test video to get started."}
@@ -185,10 +219,9 @@ export function JobsBoard() {
               const meta = JOB_STATES[state] ?? { label: `#${state}`, color: "text-slate-400" };
               return (
                 <tr key={job.jobId} className="bg-slate-950">
-                  <td className="px-4 py-3 font-mono text-xs text-slate-400">
-                    {job.jobId.slice(-8)}
+                  <td className="px-4 py-3 text-slate-300">
+                    {assetTitles[job.assetId] ?? job.assetId.slice(-8)}
                   </td>
-                  <td className="px-4 py-3 text-slate-300">{job.assetId.slice(-8)}</td>
                   <td className={`px-4 py-3 font-medium ${meta.color}`}>
                     {meta.label}
                     {event?.currentRendition && state === 2 && (
@@ -216,7 +249,7 @@ export function JobsBoard() {
                     )}
                   </td>
                   <td className="px-4 py-3 text-xs text-slate-500">
-                    {new Date(job.submittedAt).toLocaleTimeString("en-GB", { hour12: false })}
+                    {formatSubmitted(job.submittedAt)}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1.5">
