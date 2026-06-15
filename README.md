@@ -22,6 +22,20 @@ pnpm db:migrate               # create database schema
 pnpm dev                      # run everything via turbo
 ```
 
+## Production images
+
+Each app ships a Dockerfile (built from the repo root via `turbo prune`);
+video-svc has separate `api` and `worker` targets so only the worker image
+carries ffmpeg. The full production-shaped stack — split worker, one-off
+migration task, offset host ports so it coexists with the dev stack:
+
+```bash
+docker compose -f docker-compose.prod.yml up --build -d
+# web http://localhost:3100, gateway http://localhost:4100
+```
+
+The AWS rollout plan lives in [docs/aws-deployment.md](docs/aws-deployment.md).
+
 ## Layout
 
 ```

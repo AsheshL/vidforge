@@ -1,0 +1,133 @@
+# Production-shaped stack: every app runs from its Docker image, the worker
+# is split from the video API, and migrations run as a one-off task — the
+# same topology the AWS deployment uses (docs/aws-deployment.md).
+#
+#   docker compose -f docker-compose.prod.yml up --build -d
+#
+# Host ports are offset (+100) so it can run next to the dev compose stack.
+# Secrets here are local-only defaults; AWS injects real ones from Secrets
+# Manager.
+
+x-app-env: &app-env
+  DATABASE_URL: postgresql://vidforge:vidforge@postgres:5432/vidforge
+  REDIS_URL: redis://redis:6379
+  S3_ENDPOINT: http://minio:9000
+  # Browsers fetch presigned segment URLs directly, so they need the host
+  # address, not the compose-network one.
+  S3_PUBLIC_ENDPOINT: http://localhost:9100
+  S3_BUCKET: vidforge-media
+  S3_ACCESS_KEY: vidforge
+  S3_SECRET_KEY: vidforge-secret
+  JWT_SECRET: prod-compose-jwt-secret
+  CONTEXT_SIGNING_SECRET: prod-compose-signing-secret
+  SMTP_URL: smtp://mailpit:1025
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: vidforge
+      POSTGRES_PASSWORD: vidforge
+      POSTGRES_DB: vidforge
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vidforge"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: vidforge
+      MINIO_ROOT_PASSWORD: vidforge-secret
+    ports:
+      - "9100:9000"
+
+  mailpit:
+    image: axllent/mailpit
+    ports:
+      - "8125:8025"
+
+  # One-off migration task; services wait for it to finish successfully.
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api-gateway/Dockerfile
+    working_dir: /app
+    command: ["pnpm", "--filter", "@vidforge/db", "db:deploy"]
+    environment: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  auth-svc:
+    build:
+      context: .
+      dockerfile: apps/auth-svc/Dockerfile
+    environment: *app-env
+    init: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  video-svc:
+    build:
+      context: .
+      dockerfile: apps/video-svc/Dockerfile
+      target: api
+    environment: *app-env
+    init: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+
+  transcode-worker:
+    build:
+      context: .
+      dockerfile: apps/video-svc/Dockerfile
+      target: worker
+    environment: *app-env
+    init: true
+    stop_grace_period: 120s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: apps/api-gateway/Dockerfile
+    environment:
+      <<: *app-env
+      AUTH_SVC_ADDR: auth-svc:50053
+      VIDEO_SVC_ADDR: video-svc:50051
+      WEB_ORIGIN: http://localhost:3100
+    init: true
+    ports:
+      - "4100:4000"
+    depends_on:
+      - auth-svc
+      - video-svc
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_GATEWAY_URL: http://localhost:4100
+    init: true
+    ports:
+      - "3100:3000"
+    depends_on:
+      - api-gateway

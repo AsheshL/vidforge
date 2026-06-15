@@ -5,7 +5,11 @@ import { startWorker } from "./worker.js";
 
 const PORT = process.env.PORT ?? "50051";
 
-startWorker();
+// In production the worker runs as its own service (worker-main.ts) so the
+// API task doesn't need ffmpeg; locally one process does both.
+if (process.env.DISABLE_INLINE_WORKER !== "1") {
+  startWorker();
+}
 
 const server = new Server();
 server.addService(VideoServiceService, videoServiceImpl);
