@@ -64,10 +64,28 @@ These are the things that differ from dev and will bite if missed:
   breaks.
 - **Put the gateway behind a proxy correctly.** Set `WEB_ORIGIN` for CORS,
   and give the load balancer an idle timeout ≥ 120s so SSE job-progress
-  streams (`/v1/jobs/:id/events`) aren't cut off. Behind a load balancer the
-  gateway also needs Fastify `trustProxy` enabled so rate limiting keys off
-  the real client IP rather than the proxy's — a tracked Phase 4 change (see
-  [docs/aws-deployment.md](docs/aws-deployment.md)).
+  streams (`/v1/jobs/:id/events`) aren't cut off. Set `TRUST_PROXY=true` so
+  rate limiting keys off the real client IP rather than the proxy's — but
+  only where the proxy is the sole route to the gateway, since a directly
+  reachable gateway with it on lets callers spoof `X-Forwarded-For` past the
+  auth limits.
+- **Rate limits need Redis to be fleet-wide.** Counters live in
+  `RATE_LIMIT_REDIS_URL` (defaults to `REDIS_URL`); with the in-process
+  fallback, N gateway replicas mean N× the configured limit. A Redis outage
+  drops the limits rather than the auth endpoints.
+- **Don't run the entrypoints through `pnpm exec`.** pnpm doesn't forward
+  SIGTERM, so the shutdown handlers never run and the platform SIGKILLs the
+  process instead — no SSE cleanup, and a transcode killed mid-flight. The
+  images exec `./node_modules/.bin/tsx` directly for this reason.
+- **Give the drain room.** Everything force-exits after `SHUTDOWN_GRACE_MS`
+  (25s default), so the platform's stop timeout has to be longer — compose's
+  default is 10s, which cuts a drain short. The prod compose sets
+  `stop_grace_period: 30s` (120s for the worker), matching ECS `stopTimeout`.
+- **Internal services report health over gRPC.** auth-svc and video-svc serve
+  the standard `grpc.health.v1.Health` service and stay NOT_SERVING until
+  their port is bound, so nothing is routed to a task that isn't ready; the
+  gateway's `/healthz` returns 503 once it starts draining. Each image ships
+  a matching `HEALTHCHECK`.
 - **Secrets are env-injected.** `JWT_SECRET`, `CONTEXT_SIGNING_SECRET`,
   `DATABASE_URL`, and the SMTP/S3 credentials come from the environment
   (Secrets Manager on AWS), never from a committed `.env`. The
@@ -90,6 +108,7 @@ packages/
   proto/         .proto sources + ts-proto generated types
   db/            Prisma schema + shared client
   queue/         BullMQ queue/worker factories
+  grpc-health/   grpc.health.v1 service, probe and SIGTERM drain
 ```
 
 ## Proto workflow

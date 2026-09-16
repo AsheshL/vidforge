@@ -63,20 +63,57 @@ Use CDK or Terraform from the start; nothing hand-created in the console.
 - Presigned URLs: set `S3_PUBLIC_ENDPOINT` to the real S3 endpoint (or
   CloudFront, phase 5). `forcePathStyle` must be off for real S3.
 
-## Phase 4 — Production posture changes (code)
+## Phase 4 — Production posture changes (code) — done
 
-Small code changes this plan surfaces, all flagged in the codebase already:
+The code changes are in; what remains is the AWS-side configuration each one
+expects, listed under its item.
 
-1. Rate-limit store → Redis (`@fastify/rate-limit` Redis store) + `trustProxy`,
-   so limits hold across gateway replicas.
-2. SES: real `SMTP_URL`; invite emails get a real from-domain (SES domain
-   verification + DKIM).
-3. Health checks: gateway `/healthz` exists; add gRPC health checks (or TCP)
-   for auth-svc/video-svc task definitions.
-4. Graceful shutdown: SIGTERM handlers — worker `worker.close()` (waits for the
-   in-flight ffmpeg or hands the job back), gateway `app.close()`. ECS gives
-   30s by default; bump `stopTimeout` to 120s for the worker so a mid-flight
-   transcode can finish or be requeued.
+1. **Rate limiting across replicas.** The limiter stores its counters in Redis
+   (`RATE_LIMIT_REDIS_URL`, defaulting to `REDIS_URL`), so the per-IP budget is
+   fleet-wide instead of per-task. It is registered with `skipOnError`, so an
+   ElastiCache blip drops the limits rather than the auth endpoints.
+   `TRUST_PROXY` turns on Fastify's `trustProxy`, which is what makes `req.ip`
+   the real caller rather than the ALB.
+   - *On AWS:* set `TRUST_PROXY=true` on the gateway service — but only once
+     the ALB is the sole route to the task (security group), because a
+     directly reachable task with it on lets callers spoof `X-Forwarded-For`
+     past the limits. Point `RATE_LIMIT_REDIS_URL` at ElastiCache.
+
+2. **SES.** `SMTP_URL` drives the transport, now parsed so it can be pooled and
+   paced: SES charges a TLS handshake per connection and rejects anything past
+   the account's per-second quota (`MAIL_RATE_LIMIT`, default 14/s). STARTTLS
+   is required whenever credentials are present, so they never cross the wire
+   in the clear on port 587.
+   - *On AWS:* verify the sending domain, enable DKIM, and set `MAIL_FROM` to
+     an address on it — the service logs a warning when it is left at the
+     `.local` default under `NODE_ENV=production`, because SES will reject
+     those sends. `SMTP_URL` becomes
+     `smtps://<smtp-user>:<smtp-password>@email-smtp.<region>.amazonaws.com:465`,
+     from Secrets Manager. Raise `MAIL_RATE_LIMIT` once out of the sandbox.
+
+3. **Health checks.** auth-svc and video-svc serve the standard
+   `grpc.health.v1.Health` service (`packages/grpc-health`, generated from
+   `packages/proto/src/health.proto`). Each reports NOT_SERVING until its port
+   is actually bound, and flips back to NOT_SERVING at the start of a drain.
+   Both images carry a `HEALTHCHECK` that probes themselves over gRPC; the
+   gateway's probes `/healthz`, which returns 503 while draining.
+   - *On AWS:* the task definitions can rely on the image `HEALTHCHECK` or
+     restate it as `healthCheck.command`. For the gateway's ALB target group
+     use `/healthz`; a gRPC target group (if the internal services are ever
+     fronted by one) should use the `Health/Check` method rather than TCP.
+
+4. **Graceful shutdown.** SIGTERM drains everywhere: the gateway ends its open
+   SSE streams, finishes in-flight requests and closes its clients; the gRPC
+   services report NOT_SERVING then `tryShutdown()`; the worker still waits on
+   the in-flight ffmpeg. All of them force-exit after `SHUTDOWN_GRACE_MS`
+   (25s default) so nothing hangs past the platform's patience.
+   - Note the entrypoints run `./node_modules/.bin/tsx` directly. Under
+     `pnpm exec` the signal never reaches node — pnpm does not forward it —
+     so every handler above would be dead and the platform would SIGKILL the
+     process at the end of its grace period instead.
+   - *On AWS:* `stopTimeout` must exceed `SHUTDOWN_GRACE_MS` — 30s is enough
+     for the gateway and the gRPC services; keep the worker at 120s so a
+     mid-flight transcode can finish or be requeued.
 
 ## Phase 5 — Edge and hardening (post-launch)
 

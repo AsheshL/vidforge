@@ -130,6 +130,14 @@ export function registerTranscodeRoutes(app: FastifyInstance, videoClient: Video
     });
   });
 
+  // SSE responses stay open until the client leaves, so a shutdown would
+  // wait on them forever. Tracked here and closed when the server drains;
+  // EventSource reconnects to the next task on its own.
+  const openStreams = new Set<() => void>();
+  app.addHook("onClose", async () => {
+    for (const close of [...openStreams]) close();
+  });
+
   // Bridges the gRPC server-stream to SSE for the dashboard.
   app.get("/v1/jobs/:jobId/events", { preHandler: requireRole("VIEWER") }, (req, reply) => {
     const { jobId } = req.params as { jobId: string };
@@ -140,14 +148,29 @@ export function registerTranscodeRoutes(app: FastifyInstance, videoClient: Video
     });
 
     const stream = videoClient.streamProgress({ context: req.authContext!, jobId });
+
+    let closed = false;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      openStreams.delete(close);
+      // No-op once the stream has ended on its own; cancelling re-enters
+      // here through the error handler, which the `closed` guard absorbs.
+      stream.cancel();
+      reply.raw.end();
+    };
+    openStreams.add(close);
+
     stream.on("data", (event) => {
       reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
     });
-    stream.on("end", () => reply.raw.end());
+    stream.on("end", close);
     stream.on("error", (err) => {
-      reply.raw.write(`event: error\ndata: ${JSON.stringify({ message: err.message })}\n\n`);
-      reply.raw.end();
+      if (!closed) {
+        reply.raw.write(`event: error\ndata: ${JSON.stringify({ message: err.message })}\n\n`);
+      }
+      close();
     });
-    req.raw.on("close", () => stream.cancel());
+    req.raw.on("close", close);
   });
 }

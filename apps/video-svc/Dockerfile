@@ -27,9 +27,19 @@ WORKDIR /app/apps/video-svc
 FROM base AS api
 ENV DISABLE_INLINE_WORKER=1
 EXPOSE 50051
-CMD ["pnpm", "exec", "tsx", "src/main.ts"]
+# Calls grpc.health.v1.Health/Check on itself. ECS reuses this when the task
+# definition sets no healthCheck of its own. The worker target has no gRPC
+# server to probe, so it gets none.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD ["./node_modules/.bin/tsx", "src/healthcheck.ts"]
+# Run tsx directly rather than through `pnpm exec`: pnpm does not forward
+# SIGTERM to the child, so the shutdown handlers would never run and the
+# platform would SIGKILL the process at the end of its grace period.
+CMD ["./node_modules/.bin/tsx", "src/main.ts"]
 
 FROM base AS worker
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
-CMD ["pnpm", "exec", "tsx", "src/worker-main.ts"]
+# Direct tsx, not `pnpm exec` — see the api target above. The worker needs
+# the signal most: SIGTERM is what lets it finish an in-flight transcode.
+CMD ["./node_modules/.bin/tsx", "src/worker-main.ts"]

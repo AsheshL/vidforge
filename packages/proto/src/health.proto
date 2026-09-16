@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+// The standard gRPC health checking protocol, verbatim from
+// grpc/grpc-proto (health/v1/health.proto). Kept as a local copy so the
+// existing `pnpm proto:gen` workflow generates it alongside our own
+// services instead of pulling in a separate health-check dependency.
+//
+// Load balancers, ECS container health checks and grpc_health_probe all
+// call Check on this service; the package and method names are fixed by
+// the spec and must not be renamed.
+package grpc.health.v1;
+
+message HealthCheckRequest {
+  // Empty string means "the server as a whole"; otherwise a fully
+  // qualified service name, e.g. "vidforge.auth.v1.AuthService".
+  string service = 1;
+}
+
+message HealthCheckResponse {
+  enum ServingStatus {
+    UNKNOWN = 0;
+    SERVING = 1;
+    NOT_SERVING = 2;
+    SERVICE_UNKNOWN = 3;  // Used only by the Watch method.
+  }
+  ServingStatus status = 1;
+}
+
+service Health {
+  // Returns the current serving status, or NOT_FOUND if the server does
+  // not know about the requested service.
+  rpc Check(HealthCheckRequest) returns (HealthCheckResponse);
+
+  // Streams the current status and then every subsequent change.
+  rpc Watch(HealthCheckRequest) returns (stream HealthCheckResponse);
+}
