@@ -23,4 +23,11 @@ RUN pnpm --filter @vidforge/proto proto:gen \
 ENV NODE_ENV=production
 WORKDIR /app/apps/api-gateway
 EXPOSE 4000
-CMD ["pnpm", "exec", "tsx", "src/main.ts"]
+# /healthz turns 503 while the gateway drains, so this also reports the task
+# as unhealthy during shutdown. Uses node's built-in fetch — no curl in the image.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||4000)+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+# Run tsx directly rather than through `pnpm exec`: pnpm does not forward
+# SIGTERM to the child, so the shutdown handlers would never run and the
+# platform would SIGKILL the process at the end of its grace period.
+CMD ["./node_modules/.bin/tsx", "src/main.ts"]
