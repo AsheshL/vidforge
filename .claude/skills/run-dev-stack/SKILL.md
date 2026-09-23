@@ -1,6 +1,6 @@
 ---
 name: run-dev-stack
-description: Bring up and verify the local dev/testing stack — postgres, redis, minio, mailpit via docker compose, and (with apps.sh) the full app stack (web, api-gateway, auth-svc, video-svc, metadata-svc) via turbo dev. Use when asked to run, start, or test the dev stack, spin up dependencies or the app services for testing, or check that postgres/redis/minio/the apps are up and reachable.
+description: Bring up and verify the local dev/testing stack — postgres, redis, minio, mailpit via docker compose, and (with apps.sh) the full app stack (web, api-gateway, auth-svc, video-svc, metadata-svc) via turbo dev, seeded with one test account per role (viewer/editor/admin/owner) across two orgs. Use when asked to run, start, or test the dev stack, spin up dependencies or the app services for testing, check that postgres/redis/minio/the apps are up and reachable, or seed/log in as a test account for a given role.
 ---
 
 All paths below are relative to the repo root (`video-fs/`).
@@ -56,12 +56,18 @@ Idempotent — safe to re-run. It:
    if the schema isn't "up to date" — does not attempt to auto-fix, since
    the right fix depends on *why* it's not clean (see Gotchas below and
    the Troubleshooting entry for the specific drift already hit once).
-4. If the app ports are free, starts everything with
+4. Runs `pnpm --filter @vidforge/db db:seed` — upserts the accounts
+   below by fixed id, so it's a no-op on a reused DB and populates a
+   fresh one. Always runs (cheap, idempotent), not just on a fresh start.
+5. If the app ports are free, starts everything with
    `turbo run dev --env-mode=loose` (background, logs to
    `/tmp/vidforge-dev.log`) and waits for ports to open. If already
    occupied, assumes the stack is up and skips straight to verification.
-5. Checks `GET /healthz` on the gateway (`200`) and `GET /` on web (`200`).
-6. **Only on a fresh start**, does a full round trip: `POST
+6. Checks `GET /healthz` on the gateway (`200`) and `GET /` on web (`200`).
+7. Logs in as `owner@vidforge.test` via `POST /v1/dev/login` (`200`) —
+   proves the seeded accounts actually work through the real
+   web→gateway→auth-svc→postgres chain, not just that rows exist.
+8. **Only on a fresh start**, does a full round trip: `POST
    /v1/auth/signup` through the real gateway → auth-svc → postgres path.
    `200`/`201` = fully proven; `429` = still proven reachable (rate
    limiter state is Redis-backed and outlives the process, so a `429`
@@ -71,6 +77,34 @@ Idempotent — safe to re-run. It:
 Skips the signup round trip when reusing an already-up stack — the
 port + healthz checks already cover that case, and re-hammering signup
 just burns down the shared rate limit for no new information.
+
+## Seeded accounts (`packages/db/prisma/seed.ts`)
+
+Password-less — sign in with `POST /v1/dev/login {"email": "..."}`
+against the gateway (dev-only route, disabled when `NODE_ENV=production`).
+Covers every `Role` enum value, two deep on VIEWER/EDITOR since those
+are the roles most flows branch on, plus a second org so org isolation
+(each org only sees its own assets/jobs) has something to test against.
+
+| Org | Email | Role |
+|---|---|---|
+| dev-org | `viewer@vidforge.test` | VIEWER |
+| dev-org | `viewer2@vidforge.test` | VIEWER |
+| dev-org | `editor@vidforge.test` | EDITOR |
+| dev-org | `editor2@vidforge.test` | EDITOR |
+| dev-org | `admin@vidforge.test` | ADMIN |
+| dev-org | `owner@vidforge.test` | OWNER |
+| other-org | `viewer@other.test` | VIEWER |
+| other-org | `owner@other.test` | OWNER |
+
+```bash
+curl -X POST http://127.0.0.1:4000/v1/dev/login \
+  -H "Content-Type: application/json" -d '{"email":"editor@vidforge.test"}'
+```
+
+Re-running `db:seed` (or `apps.sh`) is always safe — it upserts by a
+fixed `id` per account, so roles get corrected in place rather than
+duplicated.
 
 ## Credentials (match `.env.example`)
 
@@ -152,6 +186,12 @@ the bucket — use the agent path above for that.
   touches those columns surfaces it (as a `PrismaClientKnownRequestError:
   The column "X" does not exist` crash, not a schema-status failure).
   See Troubleshooting for the exact incident and fix.
+- **`packages/db`'s `db:seed` script needs `tsx`, which wasn't declared
+  as a dependency there** — only the app packages had it, since only
+  they'd ever run `tsx` before. Fixed by adding `tsx` to
+  `packages/db/package.json`'s `devDependencies`; `apps.sh`'s
+  `pnpm install` step picks it up. If `db:seed` ever regresses with
+  `tsx: command not found`, check that dependency is still declared.
 
 ## Troubleshooting
 

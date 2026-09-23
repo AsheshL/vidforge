@@ -40,6 +40,11 @@ if ! grep -q "Database schema is up to date" <<<"$status"; then
 fi
 echo "ok"
 
+echo "--- seed accounts ---"
+# prisma/seed.ts upserts by fixed id, so this is safe to run every time —
+# on a fresh DB it creates the accounts, on a reused one it's a no-op.
+(set -a; source .env; set +a; pnpm --filter @vidforge/db db:seed) | tail -2
+
 fresh_start=1
 if lsof -i :3000 -i :4000 -i :50051 -i :50052 -i :50053 2>/dev/null | grep -q LISTEN; then
   fresh_start=0
@@ -73,6 +78,14 @@ echo "--- web ---"
 code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/)
 [[ "$code" == "200" ]] || { echo "web root failed: HTTP $code — check /tmp/vidforge-dev.log" >&2; exit 1; }
 echo "root: $code"
+
+echo "--- seeded dev account login ---"
+# Password-less /v1/dev/login proves the seeded accounts (see Credentials
+# below) actually work end to end, not just that rows exist in postgres.
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:4000/v1/dev/login \
+  -H "Content-Type: application/json" -d '{"email":"owner@vidforge.test"}')
+[[ "$code" == "200" ]] || { echo "dev login for owner@vidforge.test failed: HTTP $code" >&2; exit 1; }
+echo "owner@vidforge.test: $code"
 
 if [[ "$fresh_start" == "1" ]]; then
   echo "--- full round trip: signup through the gateway ---"
