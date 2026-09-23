@@ -44,7 +44,11 @@ resource "aws_s3_bucket_cors_configuration" "media" {
   bucket = aws_s3_bucket.media.id
 
   cors_rule {
-    allowed_methods = ["PUT", "PATCH", "GET"]
+    # S3 CORS doesn't support PATCH (returns 400 InvalidRequest). Not
+    # needed here anyway — tus PATCH requests terminate at api-gateway's
+    # tus server (its own CORS allows PATCH); only presigned GET/PUT ever
+    # hit this bucket directly from a browser.
+    allowed_methods = ["PUT", "GET"]
     allowed_origins = [var.s3_cors_allowed_origin]
     allowed_headers = ["*"]
     expose_headers  = ["ETag", "Location", "Upload-Offset", "Upload-Length"]
