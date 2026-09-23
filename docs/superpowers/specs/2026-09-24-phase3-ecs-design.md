@@ -64,13 +64,13 @@ table.
 
 ### 1. ECR
 
-Six repositories (video-svc has two Docker targets — API and worker — each
+Five repositories (video-svc has two Docker targets — API and worker — each
 a distinct image): `vidforge/web`, `vidforge/api-gateway`,
 `vidforge/auth-svc`, `vidforge/video-svc-api`, `vidforge/video-svc-worker`.
 `aws_ecr_repository` per image, image scanning on push enabled (free,
 catches known CVEs in base images).
 
-A build/push helper, `infra/scripts/build-and-push.sh` (default: all six;
+A build/push helper, `infra/scripts/build-and-push.sh` (default: all five;
 optional single-app arg): `git diff --quiet` guard against uncommitted
 changes, `aws ecr get-login-password | docker login`, then the same
 `docker build -f apps/<app>/Dockerfile .` root-context build the README
@@ -195,7 +195,7 @@ New files in `infra/terraform/`, following Phase 2's existing pattern
 to it rather than in a separate catch-all file):
 
 ```
-ecr.tf              6 repositories, image scanning on push
+ecr.tf              5 repositories, image scanning on push
 alb.tf               ALB, target groups, listener + path rules, ALB security group
 ecs-cluster.tf        cluster, Cloud Map namespace, shared execution role, log groups
 ecs-web.tf            web task def + service, /api/health route is an app-code change (§4)
