@@ -148,3 +148,9 @@ secrets.
 | ALB | ~$20 |
 | S3 + data transfer | usage-based, small |
 | **Total** | **~$220–300/mo** (halve it with single-AZ RDS + scale-to-zero worker for staging) |
+
+## What is still open
+
+Per-phase remaining work — HTTPS on the ALB, Phase 5, the deploy pipeline,
+Terraform remote state — is tracked alongside the deferred product features in
+[backlog.md](backlog.md).
