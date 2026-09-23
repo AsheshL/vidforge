@@ -5,7 +5,7 @@ resource "aws_security_group_rule" "app_from_alb_gateway" {
   protocol                 = "tcp"
   security_group_id        = aws_security_group.app.id
   source_security_group_id = aws_security_group.alb.id
-  description               = "ALB - api-gateway"
+  description              = "ALB - api-gateway"
 }
 
 resource "aws_iam_role" "gateway_task" {
@@ -44,7 +44,7 @@ resource "aws_ecs_task_definition" "api_gateway" {
   cpu                      = var.gateway_task_cpu
   memory                   = var.gateway_task_memory
   execution_role_arn       = aws_iam_role.execution.arn
-  task_role_arn             = aws_iam_role.gateway_task.arn
+  task_role_arn            = aws_iam_role.gateway_task.arn
 
   container_definitions = jsonencode([
     {
@@ -99,8 +99,8 @@ resource "aws_ecs_service" "api_gateway" {
 
   load_balancer {
     target_group_arn = aws_lb_target_group.api_gateway.arn
-    container_name    = "api-gateway"
-    container_port    = 4000
+    container_name   = "api-gateway"
+    container_port   = 4000
   }
 
   depends_on = [aws_lb_listener.http, aws_iam_role_policy.execution]

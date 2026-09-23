@@ -54,7 +54,7 @@ resource "aws_ecs_task_definition" "video_svc_api" {
   cpu                      = var.video_api_task_cpu
   memory                   = var.video_api_task_memory
   execution_role_arn       = aws_iam_role.execution.arn
-  task_role_arn             = aws_iam_role.video_api_task.arn
+  task_role_arn            = aws_iam_role.video_api_task.arn
 
   container_definitions = jsonencode([
     {
@@ -162,7 +162,7 @@ resource "aws_ecs_task_definition" "transcode_worker" {
   cpu                      = var.worker_task_cpu
   memory                   = var.worker_task_memory
   execution_role_arn       = aws_iam_role.execution.arn
-  task_role_arn             = aws_iam_role.worker_task.arn
+  task_role_arn            = aws_iam_role.worker_task.arn
 
   container_definitions = jsonencode([
     {

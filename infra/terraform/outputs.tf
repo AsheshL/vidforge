@@ -50,3 +50,8 @@ output "ecs_cluster_name" {
 output "migration_task_definition_arn" {
   value = aws_ecs_task_definition.migrate.arn
 }
+
+output "alb_dns_name" {
+  description = "Public HTTP entrypoint for the app — http://<this value>/"
+  value       = aws_lb.main.dns_name
+}

@@ -5,7 +5,7 @@ resource "aws_security_group_rule" "app_from_alb_web" {
   protocol                 = "tcp"
   security_group_id        = aws_security_group.app.id
   source_security_group_id = aws_security_group.alb.id
-  description               = "ALB - web."
+  description              = "ALB - web."
 }
 
 resource "aws_ecs_task_definition" "web" {
@@ -56,8 +56,8 @@ resource "aws_ecs_service" "web" {
 
   load_balancer {
     target_group_arn = aws_lb_target_group.web.arn
-    container_name    = "web"
-    container_port    = 3000
+    container_name   = "web"
+    container_port   = 3000
   }
 
   depends_on = [aws_lb_listener.http, aws_iam_role_policy.execution]

@@ -20,7 +20,7 @@ resource "aws_appautoscaling_policy" "worker_scale_out" {
 
     step_adjustment {
       metric_interval_lower_bound = 0
-      scaling_adjustment           = 1
+      scaling_adjustment          = 1
     }
   }
 }
@@ -39,7 +39,7 @@ resource "aws_appautoscaling_policy" "worker_scale_in" {
 
     step_adjustment {
       metric_interval_upper_bound = 0
-      scaling_adjustment           = -1
+      scaling_adjustment          = -1
     }
   }
 }
@@ -47,12 +47,12 @@ resource "aws_appautoscaling_policy" "worker_scale_in" {
 resource "aws_cloudwatch_metric_alarm" "worker_queue_high" {
   alarm_name          = "${local.name_prefix}-worker-queue-high"
   comparison_operator = "GreaterThanThreshold"
-  evaluation_periods   = 2
-  metric_name          = "WaitingJobs"
-  namespace             = "VidForge/Queue"
-  period                = 60
-  statistic              = "Maximum"
-  threshold              = 5
+  evaluation_periods  = 2
+  metric_name         = "WaitingJobs"
+  namespace           = "VidForge/Queue"
+  period              = 60
+  statistic           = "Maximum"
+  threshold           = 5
 
   dimensions = {
     QueueName = "transcode"
@@ -64,12 +64,12 @@ resource "aws_cloudwatch_metric_alarm" "worker_queue_high" {
 resource "aws_cloudwatch_metric_alarm" "worker_queue_low" {
   alarm_name          = "${local.name_prefix}-worker-queue-low"
   comparison_operator = "LessThanOrEqualToThreshold"
-  evaluation_periods   = 5
-  metric_name          = "WaitingJobs"
-  namespace             = "VidForge/Queue"
-  period                = 60
-  statistic              = "Maximum"
-  threshold              = 0
+  evaluation_periods  = 5
+  metric_name         = "WaitingJobs"
+  namespace           = "VidForge/Queue"
+  period              = 60
+  statistic           = "Maximum"
+  threshold           = 0
 
   dimensions = {
     QueueName = "transcode"

@@ -128,7 +128,7 @@ resource "aws_security_group_rule" "app_internal_grpc_video" {
   protocol                 = "tcp"
   security_group_id        = aws_security_group.app.id
   source_security_group_id = aws_security_group.app.id
-  description               = "Internal gRPC: gateway to video-svc"
+  description              = "Internal gRPC: gateway to video-svc"
 }
 
 resource "aws_security_group_rule" "app_internal_grpc_auth" {
@@ -138,5 +138,5 @@ resource "aws_security_group_rule" "app_internal_grpc_auth" {
   protocol                 = "tcp"
   security_group_id        = aws_security_group.app.id
   source_security_group_id = aws_security_group.app.id
-  description               = "Internal gRPC: gateway to auth-svc"
+  description              = "Internal gRPC: gateway to auth-svc"
 }
