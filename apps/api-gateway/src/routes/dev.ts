@@ -10,18 +10,11 @@ import type { FastifyInstance } from "fastify";
 import { prisma } from "@vidforge/db";
 import type { VideoServiceClient } from "@vidforge/proto/video";
 import { authClient, requireRole } from "../auth.js";
+import { resolveS3Config } from "../s3-config.js";
 
 const BUCKET = process.env.S3_BUCKET ?? "vidforge-media";
 
-const s3 = new S3Client({
-  endpoint: process.env.S3_ENDPOINT ?? "http://localhost:9000",
-  region: "us-east-1",
-  forcePathStyle: true,
-  credentials: {
-    accessKeyId: process.env.S3_ACCESS_KEY ?? "vidforge",
-    secretAccessKey: process.env.S3_SECRET_KEY ?? "vidforge-secret",
-  },
-});
+const s3 = new S3Client(resolveS3Config());
 
 const SEED_VIDEO = join(tmpdir(), "vidforge-seed.mp4");
 
