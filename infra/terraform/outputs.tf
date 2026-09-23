@@ -42,3 +42,11 @@ output "database_url_secret_arn" {
 output "smtp_url_secret_arn" {
   value = aws_secretsmanager_secret.smtp_url.arn
 }
+
+output "ecs_cluster_name" {
+  value = aws_ecs_cluster.main.name
+}
+
+output "migration_task_definition_arn" {
+  value = aws_ecs_task_definition.migrate.arn
+}
