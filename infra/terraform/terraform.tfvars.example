@@ -1,0 +1,10 @@
+aws_region   = "ap-south-1"
+project_name = "vidforge"
+environment  = "prod"
+
+# db_instance_class    = "db.t4g.micro"
+# db_allocated_storage = 20
+# redis_node_type      = "cache.t4g.micro"
+
+# Update once Phase 3 creates the ALB/CloudFront domain.
+# s3_cors_allowed_origin = "https://app.example.com"
