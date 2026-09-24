@@ -5,14 +5,16 @@ on:
     branches: [main]
   pull_request:
 
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   ci:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Scoped to this job, not the whole workflow: a workflow-level
+    # concurrency block would cancel the `deploy` job too on a rapid
+    # second push to main — confirmed live, mid-rollout, the hard way.
+    concurrency:
+      group: ci-${{ github.ref }}
+      cancel-in-progress: true
     services:
       postgres:
         image: postgres:16
