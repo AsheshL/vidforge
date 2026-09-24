@@ -175,3 +175,9 @@ variable "domain_name" {
   type        = string
   default     = "vidforge.dev"
 }
+
+variable "github_repo" {
+  description = "GitHub \"owner/repo\" allowed to assume the CI/CD deploy role via OIDC."
+  type        = string
+  default     = "AsheshL/vidforge"
+}

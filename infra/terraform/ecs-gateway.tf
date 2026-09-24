@@ -91,6 +91,11 @@ resource "aws_ecs_service" "api_gateway" {
   desired_count   = 1
   launch_type     = "FARGATE"
 
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
   network_configuration {
     subnets          = aws_subnet.private[*].id
     security_groups  = [aws_security_group.app.id]
@@ -101,6 +106,11 @@ resource "aws_ecs_service" "api_gateway" {
     target_group_arn = aws_lb_target_group.api_gateway.arn
     container_name   = "api-gateway"
     container_port   = 4000
+  }
+
+  # See ecs-web.tf's identical lifecycle block for why.
+  lifecycle {
+    ignore_changes = [task_definition]
   }
 
   depends_on = [aws_lb_listener.http, aws_iam_role_policy.execution]
