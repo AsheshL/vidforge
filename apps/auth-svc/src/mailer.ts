@@ -58,7 +58,17 @@ if (process.env.NODE_ENV === "production" && !process.env.MAIL_FROM) {
   );
 }
 
-const transport = createTransport(smtpOptions(SMTP_URL) as TransportOptions);
+// Built lazily, not at module load: SMTP_URL can be an unconfigured
+// placeholder (e.g. before SES domain verification on a fresh deploy), and
+// that must only fail the invite-email feature, not crash the whole
+// process before any request has even come in.
+let transport: ReturnType<typeof createTransport> | undefined;
+function getTransport() {
+  if (!transport) {
+    transport = createTransport(smtpOptions(SMTP_URL) as TransportOptions);
+  }
+  return transport;
+}
 
 export async function sendInviteEmail(opts: {
   to: string;
@@ -70,7 +80,7 @@ export async function sendInviteEmail(opts: {
   loginUrl: string;
 }) {
   const hours = Math.round((opts.expiresAt.getTime() - Date.now()) / 3_600_000);
-  await transport.sendMail({
+  await getTransport().sendMail({
     from: FROM,
     to: opts.to,
     subject: `You've been invited to ${opts.orgName} on VidForge`,

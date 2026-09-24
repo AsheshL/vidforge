@@ -1,5 +1,41 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { smtpOptions } from "./mailer.js";
+
+describe("mailer module load", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it("does not throw on import even when SMTP_URL is not a valid URL", async () => {
+    // A freshly-provisioned Secrets Manager value before SES domain
+    // verification — this must not crash the whole auth-svc process at
+    // boot; only sendInviteEmail (already try/caught by its one caller)
+    // should fail once someone actually tries to send.
+    vi.stubEnv("SMTP_URL", "REPLACE_ME_AFTER_SES_DOMAIN_VERIFICATION");
+    vi.resetModules();
+
+    await expect(import("./mailer.js")).resolves.toBeDefined();
+  });
+
+  it("rejects sendInviteEmail (not the whole process) when SMTP_URL is invalid", async () => {
+    vi.stubEnv("SMTP_URL", "REPLACE_ME_AFTER_SES_DOMAIN_VERIFICATION");
+    vi.resetModules();
+
+    const { sendInviteEmail } = await import("./mailer.js");
+    await expect(
+      sendInviteEmail({
+        to: "a@example.com",
+        displayName: "A",
+        orgName: "Org",
+        inviterName: "B",
+        tempPassword: "x",
+        expiresAt: new Date(),
+        loginUrl: "https://example.com",
+      }),
+    ).rejects.toThrow();
+  });
+});
 
 describe("smtpOptions", () => {
   it("reads the dev Mailpit URL without auth or TLS", () => {
