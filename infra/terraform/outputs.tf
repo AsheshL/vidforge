@@ -52,6 +52,11 @@ output "migration_task_definition_arn" {
 }
 
 output "alb_dns_name" {
-  description = "Public HTTP entrypoint for the app — http://<this value>/"
+  description = "Raw ALB hostname — HTTP here redirects to the real domain below."
   value       = aws_lb.main.dns_name
+}
+
+output "app_url" {
+  description = "Public HTTPS entrypoint for the app."
+  value       = "https://${var.domain_name}"
 }

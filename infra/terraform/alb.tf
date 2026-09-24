@@ -10,6 +10,13 @@ resource "aws_security_group" "alb" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -82,40 +89,16 @@ resource "aws_lb_listener" "http" {
   port              = 80
   protocol          = "HTTP"
 
+  # Bearer tokens and the tus upload stream must never go out in the clear —
+  # every plain HTTP request is redirected, path rules included, so this
+  # listener carries no forwarding rules of its own (see https.tf).
   default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.web.arn
-  }
-}
+    type = "redirect"
 
-resource "aws_lb_listener_rule" "gateway_v1" {
-  listener_arn = aws_lb_listener.http.arn
-  priority     = 100
-
-  action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.api_gateway.arn
-  }
-
-  condition {
-    path_pattern {
-      values = ["/v1/*"]
-    }
-  }
-}
-
-resource "aws_lb_listener_rule" "gateway_healthz" {
-  listener_arn = aws_lb_listener.http.arn
-  priority     = 101
-
-  action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.api_gateway.arn
-  }
-
-  condition {
-    path_pattern {
-      values = ["/healthz"]
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
     }
   }
 }

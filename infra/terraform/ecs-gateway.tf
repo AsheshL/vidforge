@@ -58,7 +58,7 @@ resource "aws_ecs_task_definition" "api_gateway" {
       environment = [
         { name = "AUTH_SVC_ADDR", value = "auth.vidforge.local:50053" },
         { name = "VIDEO_SVC_ADDR", value = "video.vidforge.local:50051" },
-        { name = "WEB_ORIGIN", value = "http://${aws_lb.main.dns_name}" },
+        { name = "WEB_ORIGIN", value = "https://${var.domain_name}" },
         { name = "TRUST_PROXY", value = "true" },
         { name = "RATE_LIMIT_REDIS_URL", value = "redis://${aws_elasticache_cluster.main.cache_nodes[0].address}:6379" },
         { name = "S3_BUCKET", value = aws_s3_bucket.media.bucket },

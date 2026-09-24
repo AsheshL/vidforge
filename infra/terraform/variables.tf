@@ -169,3 +169,9 @@ variable "alb_idle_timeout" {
   type        = number
   default     = 120
 }
+
+variable "domain_name" {
+  description = "Apex domain registered in Route53 that fronts the ALB (public HTTPS entrypoint)."
+  type        = string
+  default     = "vidforge.dev"
+}
