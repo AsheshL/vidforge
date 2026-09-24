@@ -111,8 +111,9 @@ Remaining inside Phase 3:
   `infra/scripts/generate-ses-smtp-credentials.sh` and written to Secrets
   Manager. **Still open:** this AWS account's SES is in sandbox mode
   (`ProductionAccessEnabled: false`) — sending only reaches verified
-  recipient addresses until someone requests production access through AWS
-  Support.
+  recipient addresses. Production access requested out-of-band via
+  `aws sesv2 put-account-details` on 2026-09-25 (transactional mail type,
+  `vidforge.dev`); `ReviewDetails.Status` is `PENDING` awaiting AWS review.
 
 ### Pending — Phase 5 (edge and post-launch hardening)
 
