@@ -107,9 +107,19 @@ data "aws_iam_policy_document" "github_deploy" {
   }
 
   statement {
-    sid       = "PassExecutionRole"
-    actions   = ["iam:PassRole"]
-    resources = [aws_iam_role.execution.arn]
+    sid     = "PassTaskRoles"
+    actions = ["iam:PassRole"]
+    # RegisterTaskDefinition needs PassRole on both executionRoleArn (every
+    # task def) and taskRoleArn (only set on api-gateway/video-svc-api/
+    # transcode-worker — web/auth-svc/migrate have none). Found this the
+    # hard way: the first real CI deploy run failed on exactly this,
+    # having only granted the execution role.
+    resources = [
+      aws_iam_role.execution.arn,
+      aws_iam_role.gateway_task.arn,
+      aws_iam_role.video_api_task.arn,
+      aws_iam_role.worker_task.arn,
+    ]
   }
 }
 
