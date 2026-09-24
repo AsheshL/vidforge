@@ -67,6 +67,11 @@ resource "aws_ecs_service" "auth_svc" {
   desired_count   = 1
   launch_type     = "FARGATE"
 
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
   network_configuration {
     subnets          = aws_subnet.private[*].id
     security_groups  = [aws_security_group.app.id]
@@ -78,6 +83,11 @@ resource "aws_ecs_service" "auth_svc" {
   }
 
   depends_on = [aws_iam_role_policy.execution]
+
+  # See ecs-web.tf's identical lifecycle block for why.
+  lifecycle {
+    ignore_changes = [task_definition]
+  }
 
   tags = {
     Name = "${local.name_prefix}-auth-svc"

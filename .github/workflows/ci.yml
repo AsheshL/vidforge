@@ -68,3 +68,36 @@ jobs:
         env:
           # Build-time only; runtime values come from the deploy environment.
           NEXT_PUBLIC_GATEWAY_URL: http://localhost:4000
+
+  deploy:
+    name: Deploy to ECS
+    needs: ci
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: deploy-prod
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      # No long-lived AWS keys in repository secrets — this role trusts
+      # only GitHub Actions runs on this repo's main branch (see
+      # infra/terraform/ci-cd.tf).
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Build and push images
+        run: infra/scripts/build-and-push.sh
+
+      - name: Run migration and deploy all services
+        run: infra/scripts/ecs-ci-deploy.sh
+        env:
+          CLUSTER: ${{ vars.ECS_CLUSTER }}
+          PRIVATE_SUBNETS: ${{ vars.ECS_PRIVATE_SUBNETS }}
+          APP_SECURITY_GROUP: ${{ vars.ECS_APP_SECURITY_GROUP }}

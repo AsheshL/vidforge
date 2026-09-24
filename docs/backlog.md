@@ -129,20 +129,30 @@ Remaining inside Phase 3:
   rather than replacing them (the app limiter is per-identity and knows about
   auth endpoints; WAF is per-IP and sits in front).
 
-### Pending — CI/CD
+### ~~Pending~~ Done — CI/CD
 
-CI gates on lint, typecheck, test, and migration drift, but nothing deploys.
-There is no deploy job at all.
+A `deploy` job on `.github/workflows/ci.yml`, gated on the existing
+lint/typecheck/test/drift-check job, runs on every push to main: builds and
+pushes all 5 images tagged with the git SHA
+(`infra/scripts/build-and-push.sh`), runs the migration
+(`infra/scripts/ecs-ci-deploy.sh`, aborting the deploy on failure), then
+deploys every service and verifies none of them hit a circuit-breaker
+rollback (`deployment_circuit_breaker` is now on all 5 `aws_ecs_service`
+resources).
 
-Needed on main, after the existing gates:
+Authenticates via GitHub OIDC → a repo/branch-scoped IAM role
+(`infra/terraform/ci-cd.tf`) — no long-lived AWS keys in repository secrets.
 
-1. Build images and push to ECR, tagged with the git SHA.
-2. Run the migration task against RDS; abort the deploy if it fails.
-3. `aws ecs update-service --force-new-deployment` per service (or a Terraform
-   apply), gated on deployment circuit-breaker rollback.
+Deliberately doesn't use Terraform to deploy (`aws ecs update-service`
+directly instead, via `infra/scripts/ecs-register-revision.sh`): state is
+still local-only (see "Terraform remote state" below), so CI has no way to
+read or apply it. Each service's `aws_ecs_service` has
+`lifecycle.ignore_changes` on `task_definition` so a later workstation
+`apply` doesn't undo a CI deploy.
 
-Authentication via GitHub OIDC → IAM role. No long-lived AWS keys in repository
-secrets.
+Live-tested end to end before landing (not just planned/reviewed): a full
+run of `ecs-ci-deploy.sh` against real AWS — migration, all 5 services
+redeployed, rollback check — completed clean.
 
 ### Pending — operational
 

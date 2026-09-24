@@ -96,6 +96,11 @@ resource "aws_ecs_service" "video_svc_api" {
   desired_count   = 1
   launch_type     = "FARGATE"
 
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
   network_configuration {
     subnets          = aws_subnet.private[*].id
     security_groups  = [aws_security_group.app.id]
@@ -107,6 +112,11 @@ resource "aws_ecs_service" "video_svc_api" {
   }
 
   depends_on = [aws_iam_role_policy.execution]
+
+  # See ecs-web.tf's identical lifecycle block for why.
+  lifecycle {
+    ignore_changes = [task_definition]
+  }
 
   tags = {
     Name = "${local.name_prefix}-video-svc-api"
@@ -201,6 +211,11 @@ resource "aws_ecs_service" "transcode_worker" {
   desired_count   = 1
   launch_type     = "FARGATE"
 
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
   network_configuration {
     subnets          = aws_subnet.private[*].id
     security_groups  = [aws_security_group.app.id]
@@ -211,9 +226,11 @@ resource "aws_ecs_service" "transcode_worker" {
 
   # Task 11's Application Auto Scaling policy changes desired_count out of
   # band; without this, a later `terraform apply` would fight the scaler
-  # and reset it back to 1.
+  # and reset it back to 1. task_definition ignored for the same reason as
+  # ecs-web.tf's identical block: CI updates it directly, no Terraform
+  # state access from CI.
   lifecycle {
-    ignore_changes = [desired_count]
+    ignore_changes = [desired_count, task_definition]
   }
 
   tags = {

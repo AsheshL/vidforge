@@ -48,6 +48,11 @@ resource "aws_ecs_service" "web" {
   desired_count   = 1
   launch_type     = "FARGATE"
 
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
   network_configuration {
     subnets          = aws_subnet.private[*].id
     security_groups  = [aws_security_group.app.id]
@@ -58,6 +63,15 @@ resource "aws_ecs_service" "web" {
     target_group_arn = aws_lb_target_group.web.arn
     container_name   = "web"
     container_port   = 3000
+  }
+
+  # CI (infra/scripts/ecs-register-revision.sh) registers new revisions and
+  # updates the service directly — no Terraform state access from CI (see
+  # docs/backlog.md's "Terraform remote state" item). Without this, the
+  # next `terraform apply` from a workstation would roll a CI-deployed
+  # image back to whatever *_image_tag var it was last run with.
+  lifecycle {
+    ignore_changes = [task_definition]
   }
 
   depends_on = [aws_lb_listener.http, aws_iam_role_policy.execution]
