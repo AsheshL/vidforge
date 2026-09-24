@@ -101,10 +101,10 @@ itself (`apps/video-svc/src/worker-main.ts` → CloudWatch `VidForge/Queue`).
 
 Remaining inside Phase 3:
 
-- **HTTPS.** The ALB has an HTTP listener only — no ACM certificate, no
-  443 listener, no HTTP→HTTPS redirect. Everything including bearer tokens and
-  the tus upload stream is in the clear today. This is the blocker before any
-  real traffic.
+- ~~**HTTPS.**~~ Done. `vidforge.dev` registered via Route53 (registration
+  itself run out-of-band, not in Terraform — a purchased domain shouldn't be
+  destroyable by `terraform destroy`); ACM cert, 443 listener, HTTP→HTTPS
+  redirect, and the apex alias record are in `infra/terraform/https.tf`.
 - **`MAIL_FROM` and SES domain verification.** Not set in Terraform, so
   auth-svc falls back to the `.local` default. Under `NODE_ENV=production` the
   service logs a warning about exactly this, and SES will reject the sends.
