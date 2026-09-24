@@ -87,56 +87,69 @@ export const authServiceImpl: AuthServiceServer = {
         grpcError(status.INVALID_ARGUMENT, "valid email, display name and a password of 8+ characters required"),
       );
     }
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) {
-      return callback(grpcError(status.ALREADY_EXISTS, "an account with this email already exists"));
+    try {
+      const existing = await prisma.user.findUnique({ where: { email } });
+      if (existing) {
+        return callback(grpcError(status.ALREADY_EXISTS, "an account with this email already exists"));
+      }
+      const passwordHash = await hashPassword(password);
+      // Each signup gets its own org: org scoping then isolates their assets
+      // and jobs, and as OWNER they can manage everything inside it.
+      const user = await prisma.$transaction(async (tx) => {
+        const org = await tx.org.create({
+          data: { name: call.request.orgName.trim() || `${displayName.trim()}'s org` },
+        });
+        return tx.user.create({
+          data: { email, displayName: displayName.trim(), passwordHash, orgId: org.id, role: "OWNER" },
+        });
+      });
+      await prisma.auditEvent.create({
+        data: {
+          orgId: user.orgId,
+          actorUserId: user.id,
+          action: "user.sign_up",
+          resourceType: "user",
+          resourceId: user.id,
+        },
+      });
+      const { token, expiresAt } = await signToken({ sub: user.id, org: user.orgId, role: user.role });
+      callback(null, { token, user: toProtoUser(user), expiresAt, passwordChangeRequired: false });
+    } catch (err) {
+      // An uncaught rejection here would take the whole process down, not
+      // just this request — hit this for real when migrations hadn't run
+      // yet against a fresh RDS instance.
+      callback(grpcError(status.INTERNAL, `signup failed: ${(err as Error).message}`));
     }
-    const passwordHash = await hashPassword(password);
-    // Each signup gets its own org: org scoping then isolates their assets
-    // and jobs, and as OWNER they can manage everything inside it.
-    const user = await prisma.$transaction(async (tx) => {
-      const org = await tx.org.create({
-        data: { name: call.request.orgName.trim() || `${displayName.trim()}'s org` },
-      });
-      return tx.user.create({
-        data: { email, displayName: displayName.trim(), passwordHash, orgId: org.id, role: "OWNER" },
-      });
-    });
-    await prisma.auditEvent.create({
-      data: {
-        orgId: user.orgId,
-        actorUserId: user.id,
-        action: "user.sign_up",
-        resourceType: "user",
-        resourceId: user.id,
-      },
-    });
-    const { token, expiresAt } = await signToken({ sub: user.id, org: user.orgId, role: user.role });
-    callback(null, { token, user: toProtoUser(user), expiresAt, passwordChangeRequired: false });
   },
 
   login: async (call, callback) => {
-    const user = await prisma.user.findUnique({ where: { email: call.request.email } });
-    // Same error for unknown email and wrong password: no account probing.
-    if (!user?.passwordHash || !(await verifyPassword(call.request.password, user.passwordHash))) {
-      return callback(grpcError(status.UNAUTHENTICATED, "invalid email or password"));
-    }
-    if (user.mustChangePassword) {
-      if (user.passwordExpiresAt && user.passwordExpiresAt < new Date()) {
-        return callback(
-          grpcError(status.UNAUTHENTICATED, "temporary password expired — ask your admin to invite you again"),
-        );
+    try {
+      const user = await prisma.user.findUnique({ where: { email: call.request.email } });
+      // Same error for unknown email and wrong password: no account probing.
+      if (!user?.passwordHash || !(await verifyPassword(call.request.password, user.passwordHash))) {
+        return callback(grpcError(status.UNAUTHENTICATED, "invalid email or password"));
       }
-      // Correct temp password, but no session until they set their own.
-      return callback(null, {
-        token: "",
-        user: toProtoUser(user),
-        expiresAt: undefined,
-        passwordChangeRequired: true,
-      });
+      if (user.mustChangePassword) {
+        if (user.passwordExpiresAt && user.passwordExpiresAt < new Date()) {
+          return callback(
+            grpcError(status.UNAUTHENTICATED, "temporary password expired — ask your admin to invite you again"),
+          );
+        }
+        // Correct temp password, but no session until they set their own.
+        return callback(null, {
+          token: "",
+          user: toProtoUser(user),
+          expiresAt: undefined,
+          passwordChangeRequired: true,
+        });
+      }
+      const { token, expiresAt } = await signToken({ sub: user.id, org: user.orgId, role: user.role });
+      callback(null, { token, user: toProtoUser(user), expiresAt, passwordChangeRequired: false });
+    } catch (err) {
+      // Same reasoning as signUp's try/catch just above: an uncaught
+      // rejection here crashes the whole process, not just this request.
+      callback(grpcError(status.INTERNAL, `login failed: ${(err as Error).message}`));
     }
-    const { token, expiresAt } = await signToken({ sub: user.id, org: user.orgId, role: user.role });
-    callback(null, { token, user: toProtoUser(user), expiresAt, passwordChangeRequired: false });
   },
 
   inviteUser: async (call, callback) => {
