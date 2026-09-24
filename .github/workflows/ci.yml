@@ -74,7 +74,9 @@ jobs:
   deploy:
     name: Deploy to ECS
     needs: ci
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # Disabled: AWS infra was torn down 2026-09-25 (see docs/backlog.md).
+    # Re-enable by restoring the branch/event condition once infra is back.
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 20
     concurrency:
