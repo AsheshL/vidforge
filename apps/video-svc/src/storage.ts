@@ -12,18 +12,11 @@ import {
 } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 import type { Readable } from "node:stream";
+import { resolveS3Config } from "./s3-config.js";
 
 export const BUCKET = process.env.S3_BUCKET ?? "vidforge-media";
 
-export const s3 = new S3Client({
-  endpoint: process.env.S3_ENDPOINT ?? "http://localhost:9000",
-  region: "us-east-1",
-  forcePathStyle: true, // required for MinIO
-  credentials: {
-    accessKeyId: process.env.S3_ACCESS_KEY ?? "vidforge",
-    secretAccessKey: process.env.S3_SECRET_KEY ?? "vidforge-secret",
-  },
-});
+export const s3 = new S3Client(resolveS3Config());
 
 export async function ensureBucket() {
   try {

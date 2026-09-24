@@ -5,33 +5,19 @@ import type { Readable } from "node:stream";
 import type { VideoServiceClient } from "@vidforge/proto/video";
 import { requireRole } from "../auth.js";
 import { rewritePlaylist } from "../playlist.js";
+import { resolveS3Config } from "../s3-config.js";
 
 const BUCKET = process.env.S3_BUCKET ?? "vidforge-media";
 // Long enough to watch a video, short enough that a leaked URL goes stale.
 const SIGNED_URL_TTL_SECONDS = 900;
 
-const credentials = {
-  accessKeyId: process.env.S3_ACCESS_KEY ?? "vidforge",
-  secretAccessKey: process.env.S3_SECRET_KEY ?? "vidforge-secret",
-};
-
 // The gateway fetches playlist bytes over the internal endpoint (reachable
 // from inside the network: minio:9000 / the S3 service endpoint).
-const s3 = new S3Client({
-  endpoint: process.env.S3_ENDPOINT ?? "http://localhost:9000",
-  region: "us-east-1",
-  forcePathStyle: true, // required for MinIO
-  credentials,
-});
+const s3 = new S3Client(resolveS3Config());
 
 // Presigned URLs are handed to the browser, so they must embed a
 // browser-reachable host — which in prod differs from the internal one.
-const s3Public = new S3Client({
-  endpoint: process.env.S3_PUBLIC_ENDPOINT ?? process.env.S3_ENDPOINT ?? "http://localhost:9000",
-  region: "us-east-1",
-  forcePathStyle: true,
-  credentials,
-});
+const s3Public = new S3Client(resolveS3Config(process.env.S3_PUBLIC_ENDPOINT ?? process.env.S3_ENDPOINT));
 
 async function readBody(body: Readable): Promise<string> {
   const chunks: Buffer[] = [];

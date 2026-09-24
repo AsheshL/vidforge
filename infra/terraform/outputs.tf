@@ -42,3 +42,21 @@ output "database_url_secret_arn" {
 output "smtp_url_secret_arn" {
   value = aws_secretsmanager_secret.smtp_url.arn
 }
+
+output "ecs_cluster_name" {
+  value = aws_ecs_cluster.main.name
+}
+
+output "migration_task_definition_arn" {
+  value = aws_ecs_task_definition.migrate.arn
+}
+
+output "alb_dns_name" {
+  description = "Raw ALB hostname — HTTP here redirects to the real domain below."
+  value       = aws_lb.main.dns_name
+}
+
+output "app_url" {
+  description = "Public HTTPS entrypoint for the app."
+  value       = "https://${var.domain_name}"
+}

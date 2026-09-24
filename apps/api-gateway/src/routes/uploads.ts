@@ -6,19 +6,11 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "@vidforge/db";
 import { requireRole } from "../auth.js";
+import { resolveS3Config } from "../s3-config.js";
 
 const BUCKET = process.env.S3_BUCKET ?? "vidforge-media";
 
-const s3Config = {
-  region: process.env.S3_REGION ?? "us-east-1",
-  endpoint: process.env.S3_ENDPOINT ?? "http://localhost:9000",
-  forcePathStyle: true, // required for MinIO
-  credentials: {
-    accessKeyId: process.env.S3_ACCESS_KEY ?? "vidforge",
-    secretAccessKey: process.env.S3_SECRET_KEY ?? "vidforge-secret",
-  },
-};
-
+const s3Config = resolveS3Config();
 const s3 = new S3Client(s3Config);
 
 const tusServer = new Server({

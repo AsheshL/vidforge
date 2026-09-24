@@ -35,7 +35,9 @@ docker compose -p vidforge-prod -f docker-compose.prod.yml up --build -d
 # web http://localhost:3100, gateway http://localhost:4100
 ```
 
-The AWS rollout plan lives in [docs/aws-deployment.md](docs/aws-deployment.md).
+The AWS rollout plan lives in [docs/aws-deployment.md](docs/aws-deployment.md);
+deferred product features and the remaining hardening work are tracked in
+[docs/backlog.md](docs/backlog.md).
 
 ### Production notes
 
