@@ -92,7 +92,7 @@ RPCs, no routes, no UI.
 
 ### In flight — Phase 3 (ECS services)
 
-On branch `infra-phase3-ecs`, **not yet merged to main**. Built there: ECR
+Merged to main (was branch `infra-phase3-ecs`, since deleted). Built there: ECR
 repositories, ECS cluster with a Cloud Map private DNS namespace, task
 definitions and services for web / api-gateway / auth-svc / video-svc API /
 transcode-worker, the ALB with path-based routing, the one-off migration task,
