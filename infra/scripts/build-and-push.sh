@@ -60,7 +60,10 @@ for app in "${APPS[@]}"; do
   extra_args=(${BUILD_ARGS[$app]:-})
 
   echo "--- building $app ---"
-  docker build -f "$dockerfile" "${target_flag[@]}" "${extra_args[@]}" \
+  # Fargate tasks run linux/amd64 (no runtime_platform override in the task
+  # defs); pin the build target explicitly so it doesn't follow the host
+  # architecture (arm64 on Apple Silicon), which produced unpullable images.
+  docker build --platform linux/amd64 -f "$dockerfile" "${target_flag[@]}" "${extra_args[@]}" \
     -t "${REGISTRY}/${repo}:${SHA}" \
     -t "${REGISTRY}/${repo}:latest" \
     .
