@@ -90,6 +90,13 @@ RPCs, no routes, no UI.
 
 ## Infrastructure hardening
 
+**All AWS infra torn down 2026-09-25** (`terraform destroy` + force-deleted the
+5 non-empty ECR repos out-of-band). Everything below describes what *was*
+built, kept as a record for re-provisioning — none of it is currently
+running. Survived the teardown: the `vidforge-prod-terraform-state` S3 bucket
+(`prevent_destroy`) and the `vidforge.dev` Route53 registration (managed
+out-of-band, never in Terraform). No RDS final snapshot was taken.
+
 ### In flight — Phase 3 (ECS services)
 
 Merged to main (was branch `infra-phase3-ecs`, since deleted). Built there: ECR
