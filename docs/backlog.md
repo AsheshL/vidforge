@@ -105,10 +105,14 @@ Remaining inside Phase 3:
   itself run out-of-band, not in Terraform — a purchased domain shouldn't be
   destroyable by `terraform destroy`); ACM cert, 443 listener, HTTP→HTTPS
   redirect, and the apex alias record are in `infra/terraform/https.tf`.
-- **`MAIL_FROM` and SES domain verification.** Not set in Terraform, so
-  auth-svc falls back to the `.local` default. Under `NODE_ENV=production` the
-  service logs a warning about exactly this, and SES will reject the sends.
-  Needs a verified domain, DKIM, and `MAIL_FROM` on that domain.
+- ~~**`MAIL_FROM` and SES domain verification.**~~ Done. `vidforge.dev`
+  verified as an SES domain identity, DKIM enabled, custom MAIL FROM domain
+  set (`infra/terraform/ses.tf`); SMTP credentials generated out-of-band by
+  `infra/scripts/generate-ses-smtp-credentials.sh` and written to Secrets
+  Manager. **Still open:** this AWS account's SES is in sandbox mode
+  (`ProductionAccessEnabled: false`) — sending only reaches verified
+  recipient addresses until someone requests production access through AWS
+  Support.
 
 ### Pending — Phase 5 (edge and post-launch hardening)
 
