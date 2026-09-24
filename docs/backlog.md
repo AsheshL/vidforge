@@ -156,12 +156,13 @@ redeployed, rollback check — completed clean.
 
 ### Pending — operational
 
-- **Terraform remote state.** State is local
-  (`infra/terraform/providers.tf` declares no backend; the `.tfstate` files are
-  gitignored and live on one machine). That means no locking, no history, and
-  the infrastructure is unmanageable from CI or a second operator — it should
-  move to an S3 backend with DynamoDB state locking before anyone else touches
-  it, and certainly before CI runs an apply.
+- ~~**Terraform remote state.**~~ Done. `infra/terraform/providers.tf` now has
+  a `backend "s3"` block (`infra/terraform/state-backend.tf` for the bucket
+  itself — versioned, AES256-encrypted, public access blocked). Uses
+  Terraform 1.10+'s native S3 state locking (`use_lockfile = true`), so no
+  DynamoDB table. The CI/CD pipeline above still talks to ECS directly
+  rather than running `terraform apply`, though — that would be a separate
+  follow-up now that state is actually reachable from CI.
 - **Secret rotation.** `JWT_SECRET` and `CONTEXT_SIGNING_SECRET` are generated
   once by Terraform into Secrets Manager with no rotation path. Rotating
   `CONTEXT_SIGNING_SECRET` in particular needs thought: every service must
