@@ -43,3 +43,22 @@ describe("signUp", () => {
     expect(err).toMatchObject({ code: status.INTERNAL });
   });
 });
+
+describe("login", () => {
+  it("returns an INTERNAL grpc error instead of crashing the process when the database call fails", async () => {
+    vi.mocked(prisma.user.findUnique).mockRejectedValueOnce(
+      new Error("The table `public.User` does not exist in the current database."),
+    );
+
+    const callback = vi.fn();
+    const call = {
+      request: { email: "smoke-test@example.com", password: "smoketestpassword123" },
+    } as Parameters<typeof authServiceImpl.login>[0];
+
+    await expect(authServiceImpl.login(call, callback)).resolves.toBeUndefined();
+
+    expect(callback).toHaveBeenCalledTimes(1);
+    const [err] = callback.mock.calls[0];
+    expect(err).toMatchObject({ code: status.INTERNAL });
+  });
+});
