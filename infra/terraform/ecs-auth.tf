@@ -34,6 +34,10 @@ resource "aws_ecs_task_definition" "auth_svc" {
       portMappings = [
         { containerPort = 50053, protocol = "tcp" },
       ]
+      environment = [
+        { name = "MAIL_FROM", value = "VidForge <no-reply@${var.domain_name}>" },
+        { name = "WEB_ORIGIN", value = "https://${var.domain_name}" },
+      ]
       secrets = [
         { name = "JWT_SECRET", valueFrom = aws_secretsmanager_secret.jwt_secret.arn },
         { name = "CONTEXT_SIGNING_SECRET", valueFrom = aws_secretsmanager_secret.context_signing_secret.arn },
