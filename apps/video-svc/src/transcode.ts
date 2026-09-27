@@ -13,14 +13,18 @@ export interface Rendition {
 }
 
 export interface TranscodeProfileJson {
+  // An empty list marks a thumbnails-only job (GenerateThumbnails RPC):
+  // the rendition loop below is a no-op and no master playlist is written.
   renditions: Rendition[];
   hlsSegmentSeconds?: number;
   generateThumbnails?: boolean;
   thumbnailIntervalSeconds?: number;
+  thumbnailCount?: number; // evenly spaced across the source; takes precedence over interval
+  thumbnailWidth?: number;
 }
 
 export interface TranscodeResult {
-  playlistStorageKey: string; // master.m3u8
+  playlistStorageKey: string; // master.m3u8; "" for a thumbnails-only job
   renditionKeyPrefixes: Record<string, string>;
   thumbnailStorageKeys: string[];
   sourceDurationSeconds: number;
@@ -101,15 +105,36 @@ function transcodeRendition(
   });
 }
 
+export interface ThumbnailOptions {
+  count?: number; // evenly spaced; wins over intervalSeconds when set
+  intervalSeconds?: number;
+  width?: number;
+}
+
 function extractThumbnails(
   source: string,
   outDir: string,
-  intervalSeconds: number,
+  opts: ThumbnailOptions,
+  durationSeconds: number,
   token: CancelToken,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
+    const width = opts.width && opts.width > 0 ? opts.width : 320;
+    // Evenly-spaced count: derive the fps filter's interval from the
+    // source duration, then cap the output frame count as a safety net
+    // against fps-math rounding.
+    const evenlySpaced = Boolean(opts.count && opts.count > 0 && durationSeconds > 0);
+    const interval = evenlySpaced
+      ? durationSeconds / (opts.count as number)
+      : opts.intervalSeconds && opts.intervalSeconds > 0
+        ? opts.intervalSeconds
+        : 10;
+    const outputOptions = [`-vf fps=1/${interval},scale=${width}:-1`, "-q:v 4"];
+    if (evenlySpaced) {
+      outputOptions.push(`-vframes ${opts.count}`);
+    }
     const cmd = ffmpeg(source)
-      .outputOptions([`-vf fps=1/${intervalSeconds},scale=320:-1`, "-q:v 4"])
+      .outputOptions(outputOptions)
       .output(join(outDir, "thumb_%04d.jpg"))
       .on("end", () => resolve())
       .on("error", (err) => reject(token.cancelled ? new CancelledError() : err));
@@ -170,17 +195,34 @@ export async function runTranscode(
       if (token.cancelled) throw new CancelledError();
       const dir = join(outRoot, "thumbs");
       await mkdir(dir, { recursive: true });
-      await extractThumbnails(sourcePath, dir, profile.thumbnailIntervalSeconds ?? 10, token);
+      await extractThumbnails(
+        sourcePath,
+        dir,
+        {
+          count: profile.thumbnailCount,
+          intervalSeconds: profile.thumbnailIntervalSeconds,
+          width: profile.thumbnailWidth,
+        },
+        duration,
+        token,
+      );
     }
 
-    const { writeFile } = await import("node:fs/promises");
-    await writeFile(join(outRoot, "master.m3u8"), masterPlaylist(profile.renditions));
-
     const keyPrefix = `processed/${jobId}`;
+
+    // No renditions means this is a thumbnails-only job (GenerateThumbnails
+    // RPC): there's nothing to package into an HLS master playlist.
+    let playlistStorageKey = "";
+    if (profile.renditions.length > 0) {
+      const { writeFile } = await import("node:fs/promises");
+      await writeFile(join(outRoot, "master.m3u8"), masterPlaylist(profile.renditions));
+      playlistStorageKey = `${keyPrefix}/master.m3u8`;
+    }
+
     const keys = await uploadDir(outRoot, keyPrefix);
 
     return {
-      playlistStorageKey: `${keyPrefix}/master.m3u8`,
+      playlistStorageKey,
       renditionKeyPrefixes: Object.fromEntries(
         profile.renditions.map((r) => [r.name, `${keyPrefix}/${r.name}`]),
       ),
