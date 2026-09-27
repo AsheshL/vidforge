@@ -53,7 +53,10 @@ export function registerTranscodeRoutes(app: FastifyInstance, videoClient: Video
         },
         (err, res) => {
           if (err) {
-            resolve(reply.code(502).send({ error: err.details || err.message }));
+            // NOT_FOUND: no such asset in the caller's org; INVALID_ARGUMENT:
+            // bad request (e.g. a source key that isn't the asset's).
+            const code = err.code === 5 ? 404 : err.code === 3 ? 400 : 502;
+            resolve(reply.code(code).send({ error: err.details || err.message }));
           } else {
             resolve(reply.code(202).send({ jobId: res.jobId, state: res.state }));
           }

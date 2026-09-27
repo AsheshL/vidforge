@@ -22,6 +22,21 @@ pnpm db:migrate               # create database schema
 pnpm dev                      # run everything via turbo
 ```
 
+## End-to-end tests
+
+A Playwright suite in [`e2e/`](e2e/README.md) drives every user-facing flow
+against a running stack: the API directly and the web app in a browser.
+It is not part of `pnpm test` (it needs the full stack, ffmpeg and Mailpit).
+
+```bash
+.claude/skills/run-dev-stack/apps.sh   # stack up, migrated and seeded
+docker compose up -d mailpit           # invite emails
+pnpm e2e                               # both projects; or: pnpm --filter @vidforge/e2e e2e:api | e2e:ui
+```
+
+Set `WEBHOOK_ALLOW_PRIVATE_TARGETS="true"` in `.env` so jobs-svc can deliver
+to the suite's localhost webhook receiver; without it the delivery tests skip.
+
 ## Production images
 
 Each app ships a Dockerfile (built from the repo root via `turbo prune`);
@@ -106,11 +121,14 @@ apps/
   video-svc/     gRPC :50051 — transcoding (fluent-ffmpeg)
   metadata-svc/  gRPC :50052 — asset catalog (Prisma)
   auth-svc/      gRPC :50053 — JWT, RBAC, audit log
+  jobs-svc/      gRPC :50054 — queue stats, webhooks (registration + delivery)
 packages/
   proto/         .proto sources + ts-proto generated types
   db/            Prisma schema + shared client
   queue/         BullMQ queue/worker factories
   grpc-health/   grpc.health.v1 service, probe and SIGTERM drain
+  webhooks/      webhook event publishing, signing, delivery, SSRF guard
+e2e/             Playwright end-to-end suite (API + browser)
 ```
 
 ## Proto workflow

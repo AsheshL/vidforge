@@ -78,6 +78,24 @@ function toProtoJob(row: {
   };
 }
 
+// A job may only read a source the caller's org owns. Without this, anyone
+// holding another org's asset id and source key could transcode that
+// video into a job of their own and stream it. Another org's asset is
+// reported exactly like a missing one.
+async function checkOwnedSource(ctx: RequestContext, assetId: string, sourceStorageKey: string) {
+  const asset = await prisma.asset.findUnique({
+    where: { id: assetId },
+    select: { orgId: true, sourceStorageKey: true },
+  });
+  if (!asset || asset.orgId !== ctx.orgId) {
+    return grpcError(status.NOT_FOUND, "asset not found");
+  }
+  if (asset.sourceStorageKey !== sourceStorageKey) {
+    return grpcError(status.INVALID_ARGUMENT, "sourceStorageKey is not this asset's source");
+  }
+  return null;
+}
+
 export const videoServiceImpl: VideoServiceServer = {
   submitTranscodeJob: async (call, callback) => {
     try {
@@ -89,6 +107,8 @@ export const videoServiceImpl: VideoServiceServer = {
           grpcError(status.INVALID_ARGUMENT, "assetId, sourceStorageKey and profile.renditions are required"),
         );
       }
+      const denied = await checkOwnedSource(ctx, req.assetId, req.sourceStorageKey);
+      if (denied) return callback(denied);
 
       // Idempotency: return the existing job if this key was already used.
       if (req.idempotencyKey) {
@@ -336,6 +356,8 @@ export const videoServiceImpl: VideoServiceServer = {
           grpcError(status.INVALID_ARGUMENT, "assetId and sourceStorageKey are required"),
         );
       }
+      const denied = await checkOwnedSource(ctx, req.assetId, req.sourceStorageKey);
+      if (denied) return callback(denied);
 
       // Thumbnails-only job: an empty renditions list tells the worker to
       // skip transcoding entirely and just extract JPEGs (see transcode.ts
