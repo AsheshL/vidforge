@@ -24,10 +24,6 @@ function grpcError(code: status, message: string): ServiceError {
   return Object.assign(new Error(message), { code, details: message }) as ServiceError;
 }
 
-function unimplemented(name: string): ServiceError {
-  return grpcError(status.UNIMPLEMENTED, `${name} not implemented yet`);
-}
-
 // Every RPC requires a gateway-signed context; a context forged by a caller
 // with direct network access to this port fails the signature check.
 function authenticate(ctx: RequestContext | undefined): RequestContext | ServiceError {
@@ -319,5 +315,54 @@ export const videoServiceImpl: VideoServiceServer = {
     });
   },
 
-  generateThumbnails: (_call, callback) => callback(unimplemented("GenerateThumbnails")),
+  generateThumbnails: async (call, callback) => {
+    try {
+      const req = call.request;
+      const ctx = authenticate(req.context);
+      if (ctx instanceof Error) return callback(ctx);
+      if (!req.assetId || !req.sourceStorageKey) {
+        return callback(
+          grpcError(status.INVALID_ARGUMENT, "assetId and sourceStorageKey are required"),
+        );
+      }
+
+      // Thumbnails-only job: an empty renditions list tells the worker to
+      // skip transcoding entirely and just extract JPEGs (see transcode.ts
+      // and worker.ts's guard on result.playlistStorageKey). This reuses
+      // the same TranscodeJob row and queue/worker infrastructure as a full
+      // SubmitTranscodeJob, so it needs no new schema or dispatch logic.
+      const profileJson = {
+        renditions: [],
+        generateThumbnails: true,
+        thumbnailCount: req.count || 0,
+        thumbnailIntervalSeconds: req.intervalSeconds || 0,
+        thumbnailWidth: req.width || 320,
+      };
+
+      const row = await prisma.transcodeJob.create({
+        data: {
+          assetId: req.assetId,
+          orgId: ctx.orgId,
+          createdByUserId: ctx.userId,
+          profileJson,
+        },
+      });
+
+      await queue.add(
+        "transcode",
+        {
+          jobId: row.id,
+          orgId: ctx.orgId,
+          assetId: req.assetId,
+          sourceStorageKey: req.sourceStorageKey,
+          profileJson,
+        },
+        { jobId: row.id },
+      );
+
+      callback(null, { jobId: row.id, state: JobState.JOB_STATE_QUEUED });
+    } catch (err) {
+      callback(grpcError(status.INTERNAL, (err as Error).message));
+    }
+  },
 };

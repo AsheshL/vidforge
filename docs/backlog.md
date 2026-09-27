@@ -43,11 +43,17 @@ passwords are hashed (`apps/auth-svc/src/password.ts`), teach `VerifyToken` to
 accept a key in place of a JWT (honouring `expiresAt`/`revokedAt`), and add
 management UI. This is what unblocks server-to-server and CI callers.
 
-### 4. Standalone `GenerateThumbnails` RPC
+### ~~4. Standalone `GenerateThumbnails` RPC~~ Done
 
-`UNIMPLEMENTED` in `apps/video-svc/src/service.ts`. Thumbnails can only be
-produced as a side effect of a transcode today; there is no way to (re)generate
-them for an existing asset without re-running the whole job.
+`GenerateThumbnails` in `apps/video-svc/src/service.ts` enqueues a
+thumbnails-only job onto the same `TRANSCODE_QUEUE` / worker as
+`SubmitTranscodeJob`: an empty `renditions` list on the job's `profileJson`
+marks it thumbnails-only, so the worker skips rendition transcoding, leaves
+the asset's playback state untouched, and just extracts JPEGs — evenly spaced
+by `count` when set, otherwise every `interval_seconds` — at `width`, uploads
+them under `processed/<jobId>/thumbs/`, and records the keys in
+`manifestJson.thumbnailStorageKeys` exactly as the existing side-effect path
+does.
 
 ### 5. metadata-svc
 
