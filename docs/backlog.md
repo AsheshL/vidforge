@@ -10,21 +10,7 @@ records what already exists so the work can be picked up without re-deriving it.
 
 ## Product features (deferred)
 
-### 1. Thumbnails in the UI
-
-The pipeline already generates them: a profile with `generateThumbnails` makes
-the worker extract JPEGs at `thumbnailIntervalSeconds`, and the standalone
-`GenerateThumbnails` RPC (`apps/video-svc/src/service.ts`) enqueues a
-thumbnails-only job. Either way the JPEGs are uploaded under
-`processed/<jobId>/thumbs/` and the keys recorded in the job's `manifestJson`
-(`thumbnailStorageKeys`). `GetOutputManifest` returns them. Nothing in
-`apps/web` references a thumbnail — the assets table and player page show none.
-
-Remaining: serve the keys through the existing presigned-URL path (the same
-mechanism `apps/api-gateway/src/routes/playback.ts` uses for segments) and
-render them as asset posters / a scrubbing strip.
-
-### 2. metadata-svc
+### 1. metadata-svc
 
 `apps/metadata-svc/src/main.ts` binds a gRPC server and registers no service —
 `packages/proto/src/metadata.proto` is written but unimplemented. As a result
@@ -38,7 +24,7 @@ then point the gateway at it. Note the ECS/Terraform work does not provision
 metadata-svc; adding it means a task definition, service, Cloud Map entry, and
 ECR repository.
 
-### 3. Webhook delivery
+### 2. Webhook delivery
 
 The `Webhook` model exists (URL, signing secret, `events` name list, `active`),
 `packages/queue` defines a `WEBHOOK_QUEUE` constant, and `apps/jobs-svc`
@@ -48,7 +34,7 @@ Remaining: the dispatch half — enqueueing a `WebhookJobData` onto
 `WEBHOOK_QUEUE` when a matching `QueueEvent` fires, a worker that signs and
 delivers it, retries, and a UI to register one.
 
-### 4. Storage and egress usage
+### 3. Storage and egress usage
 
 `GetUsage` in `apps/jobs-svc` reports `transcode_minutes` and `jobs_completed`,
 but returns `storage_bytes`/`egress_bytes` as `0` — neither is tracked anywhere
@@ -56,7 +42,7 @@ in the schema (`Asset.sourceBytes` is the *source* upload's size, not a
 transcoded output's, and there is no egress accounting at all). This needs new
 tracking, not just a new RPC.
 
-### 5. Collections
+### 4. Collections
 
 `Collection` and `CollectionAsset` models exist and are entirely unused — no
 RPCs, no routes, no UI.
