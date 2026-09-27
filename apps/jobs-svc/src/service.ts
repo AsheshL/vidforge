@@ -50,9 +50,11 @@ function toProtoWebhook(row: WebhookRow): ProtoWebhook {
     orgId: row.orgId,
     url: row.url,
     events: row.events.map((e) => queueEventTypeFromJSON(e)),
-    // Full secret is only ever returned once, at registration time.
+    // Full secret is only ever returned once, at registration time
+    // (registerWebhook sets signingSecret on its own response).
     signingSecretHint: row.signingSecret.slice(-4),
     active: row.active,
+    signingSecret: "",
   };
 }
 
@@ -224,7 +226,7 @@ export const jobQueueServiceImpl: JobQueueServiceServer = {
         active: true,
       },
     });
-    callback(null, toProtoWebhook(row));
+    callback(null, { ...toProtoWebhook(row), signingSecret });
   },
 
   listWebhooks: async (call, callback) => {
