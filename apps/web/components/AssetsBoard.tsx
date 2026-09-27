@@ -11,6 +11,8 @@ import {
   type PageInfo,
   type ThumbnailsResponse,
 } from "@/lib/api";
+import { getRenditionPreset } from "@/lib/renditionPresets";
+import { RenditionPicker } from "./RenditionPicker";
 
 const STATUS_COLORS: Record<Asset["status"], string> = {
   UPLOADING: "text-amber-400",
@@ -64,6 +66,7 @@ export function AssetsBoard() {
   const [canEdit, setCanEdit] = useState(false);
   const [uploading, setUploading] = useState<{ name: string; percent: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pickerAssetId, setPickerAssetId] = useState<string | null>(null);
   const [pageInfo, setPageInfo] = useState<PageInfo>({ nextPageToken: "", totalCount: 0 });
   const [loadingMore, setLoadingMore] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -138,17 +141,14 @@ export function AssetsBoard() {
     upload.start();
   }
 
-  async function transcode(asset: Asset) {
+  async function transcode(asset: Asset, presetId: string) {
     setError(null);
     const res = await fetch(`${GATEWAY_URL}/v1/assets/${asset.assetId}/transcode`, {
       method: "POST",
       headers: { "content-type": "application/json", ...authHeaders() },
       body: JSON.stringify({
         sourceStorageKey: asset.sourceStorageKey,
-        renditions: [
-          { name: "720p", width: 1280, height: 720, videoBitrateKbps: 2500, audioBitrateKbps: 128 },
-          { name: "360p", width: 640, height: 360, videoBitrateKbps: 800, audioBitrateKbps: 96 },
-        ],
+        renditions: getRenditionPreset(presetId).renditions,
         hlsSegmentSeconds: 6,
         generateThumbnails: true,
       }),
@@ -252,14 +252,25 @@ export function AssetsBoard() {
                         ▶ Play
                       </a>
                     )}
-                    {canEdit && a.sourceStorageKey && a.status !== "PROCESSING" && (
-                      <button
-                        onClick={() => void transcode(a)}
-                        className="rounded bg-slate-800 px-2 py-1 text-xs font-medium text-emerald-400 hover:bg-slate-700"
-                      >
-                        Transcode
-                      </button>
-                    )}
+                    {canEdit &&
+                      a.sourceStorageKey &&
+                      a.status !== "PROCESSING" &&
+                      (pickerAssetId === a.assetId ? (
+                        <RenditionPicker
+                          onSubmit={(presetId) => {
+                            setPickerAssetId(null);
+                            void transcode(a, presetId);
+                          }}
+                          onCancel={() => setPickerAssetId(null)}
+                        />
+                      ) : (
+                        <button
+                          onClick={() => setPickerAssetId(a.assetId)}
+                          className="rounded bg-slate-800 px-2 py-1 text-xs font-medium text-emerald-400 hover:bg-slate-700"
+                        >
+                          Transcode
+                        </button>
+                      ))}
                   </div>
                 </td>
               </tr>
