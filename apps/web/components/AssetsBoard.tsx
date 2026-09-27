@@ -8,6 +8,7 @@ import {
   getStoredUser,
   getToken,
   type Asset,
+  type PageInfo,
   type ThumbnailsResponse,
 } from "@/lib/api";
 
@@ -63,16 +64,41 @@ export function AssetsBoard() {
   const [canEdit, setCanEdit] = useState(false);
   const [uploading, setUploading] = useState<{ name: string; percent: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pageInfo, setPageInfo] = useState<PageInfo>({ nextPageToken: "", totalCount: 0 });
+  const [loadingMore, setLoadingMore] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
     if (!getToken()) return;
-    const res = await fetch(`${GATEWAY_URL}/v1/assets`, { cache: "no-store", headers: authHeaders() });
+    const res = await fetch(`${GATEWAY_URL}/v1/assets?pageSize=20`, {
+      cache: "no-store",
+      headers: authHeaders(),
+    });
     if (res.ok) {
+      const data = await res.json();
       setAuthed(true);
-      setAssets((await res.json()).assets ?? []);
+      setAssets(data.assets ?? []);
+      setPageInfo(data.pageInfo ?? { nextPageToken: "", totalCount: 0 });
     }
   }, []);
+
+  async function loadMore() {
+    if (!pageInfo.nextPageToken || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetch(
+        `${GATEWAY_URL}/v1/assets?pageSize=20&pageToken=${encodeURIComponent(pageInfo.nextPageToken)}`,
+        { cache: "no-store", headers: authHeaders() },
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setAssets((prev) => [...prev, ...(data.assets ?? [])]);
+        setPageInfo(data.pageInfo ?? { nextPageToken: "", totalCount: 0 });
+      }
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   useEffect(() => {
     const me = getStoredUser();
@@ -142,7 +168,14 @@ export function AssetsBoard() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">Assets</h2>
+        <h2 className="text-lg font-medium">
+          Assets
+          {pageInfo.totalCount > 0 && (
+            <span className="ml-2 text-sm font-normal text-slate-500">
+              {assets.length} of {pageInfo.totalCount}
+            </span>
+          )}
+        </h2>
         {canEdit && (
           <div className="flex items-center gap-3">
             {uploading && (
@@ -234,6 +267,16 @@ export function AssetsBoard() {
           </tbody>
         </table>
       </div>
+
+      {pageInfo.nextPageToken && (
+        <button
+          onClick={() => void loadMore()}
+          disabled={loadingMore}
+          className="self-center rounded-md border border-slate-700 px-4 py-1.5 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-50"
+        >
+          {loadingMore ? "Loading…" : "Load more"}
+        </button>
+      )}
     </div>
   );
 }
