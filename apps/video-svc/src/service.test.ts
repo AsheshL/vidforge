@@ -4,6 +4,11 @@ import { describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({
   queueAdd: vi.fn(),
+  publishWebhook: vi.fn(),
+}));
+
+vi.mock("@vidforge/webhooks", () => ({
+  createWebhookPublisher: vi.fn(() => hoisted.publishWebhook),
 }));
 
 vi.mock("bullmq", () => ({
@@ -15,6 +20,7 @@ vi.mock("@vidforge/queue", () => ({
   TRANSCODE_CANCEL_CHANNEL: "transcode:cancel",
   createRedis: vi.fn(() => ({ publish: vi.fn(), subscribe: vi.fn(), on: vi.fn() })),
   createTranscodeQueue: vi.fn(() => ({ add: hoisted.queueAdd, remove: vi.fn() })),
+  createWebhookQueue: vi.fn(() => ({})),
 }));
 
 vi.mock("@vidforge/svc-auth", () => ({
@@ -114,6 +120,13 @@ describe("generateThumbnails", () => {
     );
 
     expect(callback).toHaveBeenCalledWith(null, { jobId: "job1", state: JobState.JOB_STATE_QUEUED });
+    expect(hoisted.publishWebhook).toHaveBeenCalledWith({
+      type: "QUEUE_EVENT_TYPE_ENQUEUED",
+      orgId: "org1",
+      jobId: "job1",
+      assetId: "asset1",
+      attempt: 1,
+    });
   });
 
   it("falls back to a default interval when neither count nor intervalSeconds is set", async () => {

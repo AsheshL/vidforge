@@ -1,6 +1,5 @@
-# Terraform remote state (docs/backlog.md's "Terraform remote state" item):
-# state was local-only, meaning no locking, no history, and — as the CI/CD
-# pipeline found out — unusable from anywhere but this one machine.
+# Terraform remote state: state was local-only, meaning no locking, no
+# history, and — as the CI/CD pipeline found out — unusable from anywhere but this one machine.
 #
 # Bootstrapping note: this bucket is created by an ordinary `apply` while
 # state is still local, then providers.tf's `backend "s3"` block points at

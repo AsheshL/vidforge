@@ -4,9 +4,11 @@ import { prisma, JobState as DbJobState } from "@vidforge/db";
 import {
   createRedis,
   createTranscodeQueue,
+  createWebhookQueue,
   TRANSCODE_CANCEL_CHANNEL,
   TRANSCODE_QUEUE,
 } from "@vidforge/queue";
+import { createWebhookPublisher } from "@vidforge/webhooks";
 import { deletePrefix } from "./storage.js";
 import {
   JobState,
@@ -17,6 +19,7 @@ import type { RequestContext } from "@vidforge/proto/common";
 import { verifyContext } from "@vidforge/svc-auth";
 
 const queue = createTranscodeQueue();
+const publishWebhook = createWebhookPublisher(createWebhookQueue());
 const queueEvents = new QueueEvents(TRANSCODE_QUEUE, { connection: createRedis() });
 const cancelPublisher = createRedis();
 
@@ -137,6 +140,14 @@ export const videoServiceImpl: VideoServiceServer = {
       await prisma.asset.update({
         where: { id: req.assetId },
         data: { status: "PROCESSING" },
+      });
+
+      void publishWebhook({
+        type: "QUEUE_EVENT_TYPE_ENQUEUED",
+        orgId: ctx.orgId,
+        jobId: row.id,
+        assetId: req.assetId,
+        attempt: 1,
       });
 
       callback(null, { jobId: row.id, state: JobState.JOB_STATE_QUEUED });
@@ -359,6 +370,14 @@ export const videoServiceImpl: VideoServiceServer = {
         },
         { jobId: row.id },
       );
+
+      void publishWebhook({
+        type: "QUEUE_EVENT_TYPE_ENQUEUED",
+        orgId: ctx.orgId,
+        jobId: row.id,
+        assetId: req.assetId,
+        attempt: 1,
+      });
 
       callback(null, { jobId: row.id, state: JobState.JOB_STATE_QUEUED });
     } catch (err) {

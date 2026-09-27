@@ -100,8 +100,8 @@ resource "aws_ecs_service" "web" {
   }
 
   # CI (infra/scripts/ecs-register-revision.sh) registers new revisions and
-  # updates the service directly — no Terraform state access from CI (see
-  # docs/backlog.md's "Terraform remote state" item). Without this, the
+  # updates the service directly rather than running `terraform apply` (see
+  # docs/backlog.md's "Deploy through Terraform" item). Without this, the
   # next `terraform apply` from a workstation would roll a CI-deployed
   # image back to whatever *_image_tag var it was last run with.
   lifecycle {

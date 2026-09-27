@@ -117,26 +117,29 @@ expects, listed under its item.
 
 ## Phase 5 — Edge and hardening (post-launch)
 
-- CloudFront in front of presigned S3 segment URLs (signed cookies or keep
-  presigning, origin = S3). Cuts playback latency and S3 request costs.
+- ~~CloudFront in front of presigned S3 segment URLs~~ — done
+  (`infra/terraform/cloudfront.tf`, wired into `S3_PUBLIC_ENDPOINT`).
 - mTLS or App Mesh between gateway and internal gRPC services (context
   signing already prevents forgery; this adds transport privacy).
-- OpenTelemetry → ADOT collector sidecar → X-Ray/CloudWatch (trace_id is
-  already plumbed through RequestContext).
+- ~~OpenTelemetry → ADOT collector sidecar → X-Ray/CloudWatch~~ — done
+  (`packages/otel`, an `aws-otel-collector` sidecar on every task definition).
 - WAF on the ALB (rate-based rules complement the app-level limits).
 
-## CI/CD
+## CI/CD — done
 
-Extend `.github/workflows/ci.yml` with a deploy job on main (after the
-existing lint/typecheck/test/drift-check gates):
+The `deploy` job in `.github/workflows/ci.yml` runs on every push to main,
+after the lint/typecheck/test/drift-check gates:
 
-1. Build images, push to ECR (tag = git SHA).
-2. Run the migration task (`pnpm db:deploy`) against RDS; abort on failure.
-3. `aws ecs update-service --force-new-deployment` per service (or CDK/
-   Terraform apply), gated on circuit-breaker rollback.
+1. Build images, push to ECR tagged with the git SHA
+   (`infra/scripts/build-and-push.sh`).
+2. Run the migration task against RDS; abort on failure
+   (`infra/scripts/ecs-ci-deploy.sh`).
+3. Register a new task-definition revision and update each service
+   (`infra/scripts/ecs-register-revision.sh`), gated on circuit-breaker
+   rollback.
 
-GitHub OIDC → IAM role for the workflow; no long-lived AWS keys in repo
-secrets.
+Authenticates via GitHub OIDC → a repo/branch-scoped IAM role
+(`infra/terraform/ci-cd.tf`); no long-lived AWS keys in repo secrets.
 
 ## Rough monthly cost (low traffic)
 
@@ -151,6 +154,6 @@ secrets.
 
 ## What is still open
 
-Per-phase remaining work — HTTPS on the ALB, Phase 5, the deploy pipeline,
-Terraform remote state — is tracked alongside the deferred product features in
+Remaining hardening (SES production access, the rest of Phase 5, backups and
+DR) is tracked alongside the deferred product features in
 [backlog.md](backlog.md).

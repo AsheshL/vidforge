@@ -139,6 +139,9 @@ importers:
       '@vidforge/svc-auth':
         specifier: workspace:^
         version: link:../../packages/svc-auth
+      '@vidforge/webhooks':
+        specifier: workspace:*
+        version: link:../../packages/webhooks
       bullmq:
         specifier: ^5.34.8
         version: 5.78.0
@@ -204,6 +207,9 @@ importers:
       '@vidforge/svc-auth':
         specifier: workspace:^
         version: link:../../packages/svc-auth
+      '@vidforge/webhooks':
+        specifier: workspace:*
+        version: link:../../packages/webhooks
       bullmq:
         specifier: ^5.34.8
         version: 5.78.0
@@ -394,6 +400,28 @@ importers:
       '@vidforge/proto':
         specifier: workspace:*
         version: link:../proto
+    devDependencies:
+      '@types/node':
+        specifier: ^18
+        version: 18.19.130
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.1
+        version: 1.6.1(@types/node@18.19.130)(lightningcss@1.32.0)
+
+  packages/webhooks:
+    dependencies:
+      '@vidforge/db':
+        specifier: workspace:*
+        version: link:../db
+      '@vidforge/queue':
+        specifier: workspace:*
+        version: link:../queue
+      bullmq:
+        specifier: ^5.34.8
+        version: 5.78.0
     devDependencies:
       '@types/node':
         specifier: ^18

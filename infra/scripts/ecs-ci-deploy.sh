@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# CI deploy entrypoint (docs/backlog.md's "Pending — CI/CD" spec): runs the
+# CI deploy entrypoint (docs/aws-deployment.md's "CI/CD" section): runs the
 # migration, then deploys all 5 services, tagged with the current commit
 # SHA. Deliberately doesn't touch Terraform or its state — see
 # ecs-register-revision.sh's header for why — so this needs three things

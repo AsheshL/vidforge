@@ -1,7 +1,7 @@
 # SES domain verification (docs/aws-deployment.md Phase 4 item 2). SMTP
 # credentials themselves are deliberately NOT generated here — an IAM access
-# key is a long-lived secret, and this repo has no remote state backend yet
-# (see docs/backlog.md), so it stays out of local tfstate. Created out-of-band
+# key is a long-lived secret and would sit in plaintext in tfstate, so it
+# stays out of state entirely. Created out-of-band
 # by infra/scripts/generate-ses-smtp-credentials.sh, which writes straight to
 # the aws_secretsmanager_secret_version.smtp_url below (ignore_changes keeps
 # Terraform from stomping that real value back to the placeholder).
