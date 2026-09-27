@@ -72,11 +72,21 @@ then point the gateway at it. Note the ECS/Terraform work does not provision
 metadata-svc; adding it means a task definition, service, Cloud Map entry, and
 ECR repository.
 
-### 6. jobs-svc
+### ~~6. jobs-svc~~ Done
 
-`packages/proto/src/jobs.proto` exists; there is no `apps/jobs-svc`. Intended
-for scheduled/recurring job orchestration. Lowest priority of the unbuilt
-services.
+`apps/jobs-svc` implements `JobQueueService` end to end: `GetQueueStats` and
+`StreamQueueEvents` read BullMQ's own queue/event APIs (scoped to the caller's
+org by correlating BullMQ job ids back to `TranscodeJob` rows, since BullMQ
+itself has no org concept), `RegisterWebhook`/`ListWebhooks`/`DeleteWebhook`
+are full CRUD against the existing `Webhook` model, and `GetUsage` aggregates
+`transcode_minutes` and `jobs_completed` from completed `TranscodeJob` rows in
+the requested window. `storage_bytes`/`egress_bytes` are returned as `0` —
+neither is tracked anywhere in the schema today (`Asset.sourceBytes` is the
+*source* upload's size, not a transcoded output's, and there is no egress
+accounting at all), so this needs new tracking, not just a new RPC, before it
+can report real numbers. This also completes the RPC-level half of item 8
+below (registering/listing/deleting webhooks) — delivery/dispatch is still
+open, see that item.
 
 ### ~~7. Asset list pagination~~ Done
 
@@ -97,6 +107,12 @@ The `Webhook` model exists (URL, signing secret, `events` name list, `active`)
 and
 `packages/queue` defines a `WEBHOOK_QUEUE` constant, but nothing enqueues,
 dispatches, signs, or retries a delivery, and there is no UI to register one.
+
+RPC-level management (`RegisterWebhook`/`ListWebhooks`/`DeleteWebhook` in
+`apps/jobs-svc`) is done as part of item 6 above. Still open: the dispatch
+half — enqueueing a `WebhookJobData` onto `WEBHOOK_QUEUE` when a matching
+`QueueEvent` fires, a worker that signs and delivers it, retries, and a UI to
+register one.
 
 ### 9. Collections
 

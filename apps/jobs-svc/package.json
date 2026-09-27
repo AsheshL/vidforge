@@ -1,0 +1,27 @@
+{
+  "name": "@vidforge/jobs-svc",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/main.ts",
+    "lint": "echo ok",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.12.5",
+    "@vidforge/db": "workspace:*",
+    "@vidforge/grpc-health": "workspace:*",
+    "@vidforge/proto": "workspace:*",
+    "@vidforge/queue": "workspace:*",
+    "@vidforge/svc-auth": "workspace:^",
+    "bullmq": "^5.34.8"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^1.6.1"
+  }
+}
