@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { RequestContext } from "@vidforge/proto/common";
+import { tagTraceId } from "@vidforge/otel";
 
 // Shared between the gateway (signer) and internal services (verifiers).
 // Must differ from JWT_SECRET so a leaked user token can never be replayed
@@ -76,6 +77,13 @@ export function verifyContext(ctx: RequestContext | undefined): ContextVerificat
   for (const secret of candidates) {
     const expected = hmac(secret, data);
     if (actual.length === expected.length && timingSafeEqual(actual, expected)) {
+      // Every RPC that reaches this point is inside the gRPC server span the
+      // instrumentation-grpc auto-instrumentation started for it (see
+      // packages/otel). Tagging the traceId here — the one choke point every
+      // authenticated RPC in every service passes through — correlates that
+      // span with the same request's spans in every other service, without
+      // needing every call site to remember to do it.
+      tagTraceId(ctx.traceId);
       return { ok: true, context: ctx };
     }
   }

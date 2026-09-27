@@ -163,8 +163,25 @@ Remaining inside Phase 3:
   Context signing already prevents a forged `RequestContext`
   (`packages/svc-auth`), but the channels themselves are plaintext, so this is
   about transport privacy rather than authenticity.
-- **OpenTelemetry** → ADOT collector sidecar → X-Ray/CloudWatch. `trace_id` is
-  already plumbed end to end through `RequestContext`; nothing emits spans.
+- ~~**OpenTelemetry** → ADOT collector sidecar → X-Ray/CloudWatch.~~ Done.
+  Every running service (`apps/api-gateway`, `apps/auth-svc`,
+  `apps/video-svc`'s gRPC server and its separate `worker-main.ts` process,
+  `apps/web`) now starts the OpenTelemetry Node SDK, exporting over
+  OTLP/HTTP (`packages/otel`; `apps/web` uses `@vercel/otel` via
+  `instrumentation.ts` instead, Next.js's own idiom for this). Every
+  `ecs-*.tf` task definition gets a second `aws-otel-collector` container
+  receiving that OTLP traffic over `localhost` and exporting to X-Ray, with
+  an IAM policy granting the task role `xray:PutTraceSegments`/
+  `PutTelemetryRecords` (`ecs-cluster.tf`'s "OpenTelemetry" section).
+  `@opentelemetry/instrumentation-grpc` auto-instruments `@grpc/grpc-js`, so
+  gateway→auth-svc/video-svc calls get real parent/child span linkage — this
+  needed `node --import` to start tracing before the gRPC module graph
+  resolves (see `packages/otel/src/register.ts`; a plain top-of-file
+  `import` in `main.ts` patches too late under ESM and silently produces no
+  spans at all). `RequestContext.traceId` is additionally tagged onto every
+  authenticated RPC's span (`packages/svc-auth`) as a `vidforge.trace_id`
+  attribute, so a trace stays correlated across services even independent
+  of that propagation.
 - **WAF** on the ALB. Rate-based rules complement the application-level limits
   rather than replacing them (the app limiter is per-identity and knows about
   auth endpoints; WAF is per-IP and sits in front).

@@ -17,6 +17,20 @@ resource "aws_service_discovery_service" "auth_svc" {
   }
 }
 
+resource "aws_iam_role" "auth_task" {
+  name               = "${local.name_prefix}-auth-task"
+  assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
+}
+
+# auth-svc has no other task-role permissions of its own (unlike
+# gateway/video, it never touches S3) — this role exists solely to carry the
+# ADOT sidecar's X-Ray permissions.
+resource "aws_iam_role_policy" "auth_task_xray" {
+  name   = "${local.name_prefix}-auth-task-xray"
+  role   = aws_iam_role.auth_task.id
+  policy = data.aws_iam_policy_document.xray_write.json
+}
+
 resource "aws_ecs_task_definition" "auth_svc" {
   family                   = "${local.name_prefix}-auth-svc"
   requires_compatibilities = ["FARGATE"]
@@ -24,6 +38,7 @@ resource "aws_ecs_task_definition" "auth_svc" {
   cpu                      = var.auth_task_cpu
   memory                   = var.auth_task_memory
   execution_role_arn       = aws_iam_role.execution.arn
+  task_role_arn            = aws_iam_role.auth_task.arn
 
   container_definitions = jsonencode([
     {
@@ -37,6 +52,8 @@ resource "aws_ecs_task_definition" "auth_svc" {
       environment = [
         { name = "MAIL_FROM", value = "VidForge <no-reply@${var.domain_name}>" },
         { name = "WEB_ORIGIN", value = "https://${var.domain_name}" },
+        # ADOT sidecar, same task — see the container definition below.
+        { name = "OTEL_EXPORTER_OTLP_ENDPOINT", value = "http://localhost:4318" },
       ]
       secrets = [
         { name = "JWT_SECRET", valueFrom = aws_secretsmanager_secret.jwt_secret.arn },
@@ -52,6 +69,22 @@ resource "aws_ecs_task_definition" "auth_svc" {
           "awslogs-group"         = aws_cloudwatch_log_group.auth_svc.name
           "awslogs-region"        = var.aws_region
           "awslogs-stream-prefix" = "auth-svc"
+        }
+      }
+    },
+    {
+      name      = "aws-otel-collector"
+      image     = local.adot_collector_image
+      essential = false # telemetry is best-effort; a sidecar crash shouldn't take auth-svc down with it.
+      environment = [
+        { name = "AOT_CONFIG_CONTENT", value = local.adot_collector_config },
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.auth_svc.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "adot"
         }
       }
     }

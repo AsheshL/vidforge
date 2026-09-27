@@ -110,15 +110,20 @@ data "aws_iam_policy_document" "github_deploy" {
     sid     = "PassTaskRoles"
     actions = ["iam:PassRole"]
     # RegisterTaskDefinition needs PassRole on both executionRoleArn (every
-    # task def) and taskRoleArn (only set on api-gateway/video-svc-api/
-    # transcode-worker — web/auth-svc/migrate have none). Found this the
-    # hard way: the first real CI deploy run failed on exactly this,
-    # having only granted the execution role.
+    # task def) and taskRoleArn. Found the taskRoleArn half of this the hard
+    # way: the first real CI deploy run failed on exactly this, having only
+    # granted the execution role. web and auth-svc originally had no task
+    # role at all (nothing but the ADOT sidecar needed one); now that every
+    # task definition sets one (see ecs-web.tf / ecs-auth.tf's "OpenTelemetry"
+    # additions), every task role belongs in this list — migrate is still the
+    # only task def with none.
     resources = [
       aws_iam_role.execution.arn,
       aws_iam_role.gateway_task.arn,
       aws_iam_role.video_api_task.arn,
       aws_iam_role.worker_task.arn,
+      aws_iam_role.auth_task.arn,
+      aws_iam_role.web_task.arn,
     ]
   }
 }
