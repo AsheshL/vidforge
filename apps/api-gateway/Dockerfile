@@ -21,6 +21,10 @@ RUN pnpm --filter @vidforge/proto proto:gen \
     && pnpm --filter @vidforge/db db:generate
 
 ENV NODE_ENV=production
+# OTEL_EXPORTER_OTLP_ENDPOINT is set by the ECS task definition (points at
+# the ADOT sidecar); this default only matters for a manual `docker run`.
+ENV OTEL_SERVICE_NAME=api-gateway \
+    OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 WORKDIR /app/apps/api-gateway
 EXPOSE 4000
 # /healthz turns 503 while the gateway drains, so this also reports the task
@@ -30,4 +34,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 # Run tsx directly rather than through `pnpm exec`: pnpm does not forward
 # SIGTERM to the child, so the shutdown handlers would never run and the
 # platform would SIGKILL the process at the end of its grace period.
-CMD ["./node_modules/.bin/tsx", "src/main.ts"]
+# --import loads OpenTelemetry's ESM loader hook and starts the SDK before
+# src/main.ts (and the @grpc/grpc-js it imports) is even resolved — see
+# packages/otel/src/register.ts for why that has to happen this way.
+CMD ["./node_modules/.bin/tsx", "--import", "../../packages/otel/src/register.ts", "src/main.ts"]

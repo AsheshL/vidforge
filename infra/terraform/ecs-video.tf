@@ -47,6 +47,15 @@ resource "aws_iam_role_policy" "video_api_task" {
   policy = data.aws_iam_policy_document.video_api_task.json
 }
 
+# ADOT sidecar's X-Ray permissions — see ecs-cluster.tf's "OpenTelemetry"
+# section for why this is a separate policy rather than a statement folded
+# into video_api_task above.
+resource "aws_iam_role_policy" "video_api_task_xray" {
+  name   = "${local.name_prefix}-video-api-task-xray"
+  role   = aws_iam_role.video_api_task.id
+  policy = data.aws_iam_policy_document.xray_write.json
+}
+
 resource "aws_ecs_task_definition" "video_svc_api" {
   family                   = "${local.name_prefix}-video-svc-api"
   requires_compatibilities = ["FARGATE"]
@@ -72,6 +81,8 @@ resource "aws_ecs_task_definition" "video_svc_api" {
         # (cloudfront.tf) — shares s3-config.ts's S3_PUBLIC_ENDPOINT seam
         # with api-gateway.
         { name = "S3_PUBLIC_ENDPOINT", value = "https://${aws_cloudfront_distribution.media.domain_name}" },
+        # ADOT sidecar, same task — see the container definition below.
+        { name = "OTEL_EXPORTER_OTLP_ENDPOINT", value = "http://localhost:4318" },
       ]
       secrets = [
         { name = "CONTEXT_SIGNING_SECRET", valueFrom = aws_secretsmanager_secret.context_signing_secret.arn },
@@ -84,6 +95,22 @@ resource "aws_ecs_task_definition" "video_svc_api" {
           "awslogs-group"         = aws_cloudwatch_log_group.video_svc_api.name
           "awslogs-region"        = var.aws_region
           "awslogs-stream-prefix" = "video-svc-api"
+        }
+      }
+    },
+    {
+      name      = "aws-otel-collector"
+      image     = local.adot_collector_image
+      essential = false # telemetry is best-effort; a sidecar crash shouldn't take video-svc-api down with it.
+      environment = [
+        { name = "AOT_CONFIG_CONTENT", value = local.adot_collector_config },
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.video_svc_api.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "adot"
         }
       }
     }
@@ -170,6 +197,15 @@ resource "aws_iam_role_policy" "worker_task" {
   policy = data.aws_iam_policy_document.worker_task.json
 }
 
+# ADOT sidecar's X-Ray permissions — see ecs-cluster.tf's "OpenTelemetry"
+# section for why this is a separate policy rather than a statement folded
+# into worker_task above.
+resource "aws_iam_role_policy" "worker_task_xray" {
+  name   = "${local.name_prefix}-worker-task-xray"
+  role   = aws_iam_role.worker_task.id
+  policy = data.aws_iam_policy_document.xray_write.json
+}
+
 resource "aws_ecs_task_definition" "transcode_worker" {
   family                   = "${local.name_prefix}-transcode-worker"
   requires_compatibilities = ["FARGATE"]
@@ -192,6 +228,8 @@ resource "aws_ecs_task_definition" "transcode_worker" {
         # (cloudfront.tf) — shares s3-config.ts's S3_PUBLIC_ENDPOINT seam
         # with api-gateway.
         { name = "S3_PUBLIC_ENDPOINT", value = "https://${aws_cloudfront_distribution.media.domain_name}" },
+        # ADOT sidecar, same task — see the container definition below.
+        { name = "OTEL_EXPORTER_OTLP_ENDPOINT", value = "http://localhost:4318" },
       ]
       secrets = [
         { name = "CONTEXT_SIGNING_SECRET", valueFrom = aws_secretsmanager_secret.context_signing_secret.arn },
@@ -204,6 +242,22 @@ resource "aws_ecs_task_definition" "transcode_worker" {
           "awslogs-group"         = aws_cloudwatch_log_group.transcode_worker.name
           "awslogs-region"        = var.aws_region
           "awslogs-stream-prefix" = "worker"
+        }
+      }
+    },
+    {
+      name      = "aws-otel-collector"
+      image     = local.adot_collector_image
+      essential = false # telemetry is best-effort; a sidecar crash shouldn't take the worker down with it.
+      environment = [
+        { name = "AOT_CONFIG_CONTENT", value = local.adot_collector_config },
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.transcode_worker.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "adot"
         }
       }
     }

@@ -22,10 +22,14 @@ RUN pnpm --filter @vidforge/proto proto:gen \
     && pnpm --filter @vidforge/db db:generate
 
 ENV NODE_ENV=production
+# OTEL_EXPORTER_OTLP_ENDPOINT is set by the ECS task definition (points at
+# the ADOT sidecar); this default only matters for a manual `docker run`.
+ENV OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 WORKDIR /app/apps/video-svc
 
 FROM base AS api
-ENV DISABLE_INLINE_WORKER=1
+ENV DISABLE_INLINE_WORKER=1 \
+    OTEL_SERVICE_NAME=video-svc-api
 EXPOSE 50051
 # Calls grpc.health.v1.Health/Check on itself. ECS reuses this when the task
 # definition sets no healthCheck of its own. The worker target has no gRPC
@@ -35,11 +39,16 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 # Run tsx directly rather than through `pnpm exec`: pnpm does not forward
 # SIGTERM to the child, so the shutdown handlers would never run and the
 # platform would SIGKILL the process at the end of its grace period.
-CMD ["./node_modules/.bin/tsx", "src/main.ts"]
+# --import loads OpenTelemetry's ESM loader hook and starts the SDK before
+# src/main.ts (and the @grpc/grpc-js it imports) is even resolved — see
+# packages/otel/src/register.ts for why that has to happen this way.
+CMD ["./node_modules/.bin/tsx", "--import", "../../packages/otel/src/register.ts", "src/main.ts"]
 
 FROM base AS worker
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
+ENV OTEL_SERVICE_NAME=transcode-worker
 # Direct tsx, not `pnpm exec` — see the api target above. The worker needs
 # the signal most: SIGTERM is what lets it finish an in-flight transcode.
-CMD ["./node_modules/.bin/tsx", "src/worker-main.ts"]
+# --import: see the api target above.
+CMD ["./node_modules/.bin/tsx", "--import", "../../packages/otel/src/register.ts", "src/worker-main.ts"]

@@ -100,45 +100,51 @@ variable "video_svc_worker_image_tag" {
 }
 
 # --- Phase 3: task sizing (Fargate CPU units / MiB memory) ---
+#
+# web/gateway/auth/video-api were originally at Fargate's minimum (256/512,
+# enough for the app container alone); bumped one tier to 512/1024 to leave
+# room for the ADOT collector sidecar every task now runs (see ecs-cluster.tf
+# "OpenTelemetry" section). The worker was already well above minimum and is
+# untouched.
 
 variable "web_task_cpu" {
   type    = number
-  default = 256
+  default = 512
 }
 
 variable "web_task_memory" {
   type    = number
-  default = 512
+  default = 1024
 }
 
 variable "gateway_task_cpu" {
   type    = number
-  default = 256
+  default = 512
 }
 
 variable "gateway_task_memory" {
   type    = number
-  default = 512
+  default = 1024
 }
 
 variable "auth_task_cpu" {
   type    = number
-  default = 256
+  default = 512
 }
 
 variable "auth_task_memory" {
   type    = number
-  default = 512
+  default = 1024
 }
 
 variable "video_api_task_cpu" {
   type    = number
-  default = 256
+  default = 512
 }
 
 variable "video_api_task_memory" {
   type    = number
-  default = 512
+  default = 1024
 }
 
 variable "worker_task_cpu" {

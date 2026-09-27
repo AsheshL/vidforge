@@ -1,3 +1,10 @@
+// Tracing (OpenTelemetry SDK + the gRPC auto-instrumentation hook, for the
+// gRPC calls this gateway makes to auth-svc/video-svc) is started before
+// this file is even loaded, via `--import
+// ../../packages/otel/src/register.ts` on the process's command line (see
+// this package's Dockerfile CMD and `dev` script) — see
+// packages/otel/src/register.ts for why that has to happen there and not
+// here.
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";

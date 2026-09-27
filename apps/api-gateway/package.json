@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsx watch src/main.ts",
+    "dev": "OTEL_SERVICE_NAME=api-gateway tsx watch --import ../../packages/otel/src/register.ts src/main.ts",
     "lint": "echo ok",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -20,6 +20,7 @@
     "@tus/s3-store": "^2.0.4",
     "@tus/server": "^2.4.1",
     "@vidforge/db": "workspace:^",
+    "@vidforge/otel": "workspace:*",
     "@vidforge/proto": "workspace:*",
     "@vidforge/svc-auth": "workspace:^",
     "fastify": "^5.2.1",

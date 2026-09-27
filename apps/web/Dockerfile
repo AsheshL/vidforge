@@ -25,4 +25,9 @@ COPY --from=builder /app/apps/web/.next/standalone ./
 COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
 EXPOSE 3000
 ENV PORT=3000 HOSTNAME=0.0.0.0
+# OTEL_EXPORTER_OTLP_ENDPOINT is set by the ECS task definition (points at
+# the ADOT sidecar); this default (also @vercel/otel's own out-of-the-box
+# default) only matters for a manual `docker run`. Picked up by
+# instrumentation.ts's registerOTel() call.
+ENV OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 CMD ["node", "apps/web/server.js"]

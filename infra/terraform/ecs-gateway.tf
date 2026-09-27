@@ -37,6 +37,15 @@ resource "aws_iam_role_policy" "gateway_task" {
   policy = data.aws_iam_policy_document.gateway_task.json
 }
 
+# ADOT sidecar's X-Ray permissions — see ecs-cluster.tf's "OpenTelemetry"
+# section for why this is a separate policy rather than a statement folded
+# into gateway_task above.
+resource "aws_iam_role_policy" "gateway_task_xray" {
+  name   = "${local.name_prefix}-gateway-task-xray"
+  role   = aws_iam_role.gateway_task.id
+  policy = data.aws_iam_policy_document.xray_write.json
+}
+
 resource "aws_ecs_task_definition" "api_gateway" {
   family                   = "${local.name_prefix}-api-gateway"
   requires_compatibilities = ["FARGATE"]
@@ -67,6 +76,8 @@ resource "aws_ecs_task_definition" "api_gateway" {
         # (cloudfront.tf) — playback.ts presigns against this instead of
         # S3 directly whenever it's set.
         { name = "S3_PUBLIC_ENDPOINT", value = "https://${aws_cloudfront_distribution.media.domain_name}" },
+        # ADOT sidecar, same task — see the container definition below.
+        { name = "OTEL_EXPORTER_OTLP_ENDPOINT", value = "http://localhost:4318" },
       ]
       secrets = [
         { name = "CONTEXT_SIGNING_SECRET", valueFrom = aws_secretsmanager_secret.context_signing_secret.arn },
@@ -79,6 +90,22 @@ resource "aws_ecs_task_definition" "api_gateway" {
           "awslogs-group"         = aws_cloudwatch_log_group.api_gateway.name
           "awslogs-region"        = var.aws_region
           "awslogs-stream-prefix" = "api-gateway"
+        }
+      }
+    },
+    {
+      name      = "aws-otel-collector"
+      image     = local.adot_collector_image
+      essential = false # telemetry is best-effort; a sidecar crash shouldn't take the gateway down with it.
+      environment = [
+        { name = "AOT_CONFIG_CONTENT", value = local.adot_collector_config },
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.api_gateway.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "adot"
         }
       }
     }

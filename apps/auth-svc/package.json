@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsx watch src/main.ts",
+    "dev": "OTEL_SERVICE_NAME=auth-svc tsx watch --import ../../packages/otel/src/register.ts src/main.ts",
     "lint": "echo ok",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -14,6 +14,7 @@
     "@grpc/grpc-js": "^1.12.5",
     "@vidforge/db": "workspace:*",
     "@vidforge/grpc-health": "workspace:*",
+    "@vidforge/otel": "workspace:*",
     "@vidforge/proto": "workspace:*",
     "@vidforge/svc-auth": "workspace:^",
     "jose": "^5.9.6",

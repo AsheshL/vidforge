@@ -8,6 +8,19 @@ resource "aws_security_group_rule" "app_from_alb_web" {
   description              = "ALB - web."
 }
 
+resource "aws_iam_role" "web_task" {
+  name               = "${local.name_prefix}-web-task"
+  assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
+}
+
+# web has no other task-role permissions of its own — this role exists
+# solely to carry the ADOT sidecar's X-Ray permissions.
+resource "aws_iam_role_policy" "web_task_xray" {
+  name   = "${local.name_prefix}-web-task-xray"
+  role   = aws_iam_role.web_task.id
+  policy = data.aws_iam_policy_document.xray_write.json
+}
+
 resource "aws_ecs_task_definition" "web" {
   family                   = "${local.name_prefix}-web"
   requires_compatibilities = ["FARGATE"]
@@ -15,6 +28,7 @@ resource "aws_ecs_task_definition" "web" {
   cpu                      = var.web_task_cpu
   memory                   = var.web_task_memory
   execution_role_arn       = aws_iam_role.execution.arn
+  task_role_arn            = aws_iam_role.web_task.arn
 
   container_definitions = jsonencode([
     {
@@ -25,12 +39,32 @@ resource "aws_ecs_task_definition" "web" {
       portMappings = [
         { containerPort = 3000, protocol = "tcp" },
       ]
+      environment = [
+        # ADOT sidecar, same task — see the container definition below.
+        { name = "OTEL_EXPORTER_OTLP_ENDPOINT", value = "http://localhost:4318" },
+      ]
       logConfiguration = {
         logDriver = "awslogs"
         options = {
           "awslogs-group"         = aws_cloudwatch_log_group.web.name
           "awslogs-region"        = var.aws_region
           "awslogs-stream-prefix" = "web"
+        }
+      }
+    },
+    {
+      name      = "aws-otel-collector"
+      image     = local.adot_collector_image
+      essential = false # telemetry is best-effort; a sidecar crash shouldn't take web down with it.
+      environment = [
+        { name = "AOT_CONFIG_CONTENT", value = local.adot_collector_config },
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.web.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "adot"
         }
       }
     }

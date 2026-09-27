@@ -1,3 +1,9 @@
+// Tracing (OpenTelemetry SDK + the gRPC auto-instrumentation hook) is
+// started before this file is even loaded, via `--import
+// ../../packages/otel/src/register.ts` on the process's command line (see
+// this package's Dockerfile CMD and `dev` script) — see
+// packages/otel/src/register.ts for why that has to happen there and not
+// here.
 import { Server, ServerCredentials } from "@grpc/grpc-js";
 import { AuthServiceService } from "@vidforge/proto/auth";
 import { createHealthRegistry, drainOnSignals, registerHealthService } from "@vidforge/grpc-health";

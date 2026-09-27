@@ -1,3 +1,11 @@
+// Tracing (OpenTelemetry SDK) is started before this file is even loaded,
+// via `--import ../../packages/otel/src/register.ts` on the process's
+// command line (see this package's Dockerfile `worker` target CMD) — see
+// packages/otel/src/register.ts for why that has to happen there and not
+// here. The worker doesn't handle a gRPC-carried RequestContext today, so
+// there's nothing here (yet) to tag with trace_id, but the SDK still runs
+// so future spans (BullMQ job processing, ffmpeg calls) have somewhere to
+// export to.
 import { CloudWatchClient, PutMetricDataCommand } from "@aws-sdk/client-cloudwatch";
 import { createTranscodeQueue } from "@vidforge/queue";
 import { startWorker } from "./worker.js";
