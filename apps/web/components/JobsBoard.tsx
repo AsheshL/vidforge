@@ -64,7 +64,9 @@ export function JobsBoard() {
       setJobs(data.jobs ?? []);
       setPageInfo(data.pageInfo ?? { nextPageToken: "", totalCount: 0 });
     }
-    const assetsRes = await fetch(`${GATEWAY_URL}/v1/assets`, {
+    // pageSize=100 (the max) just to keep this title lookup as broad as the
+    // old unpaginated call was; the jobs list above still pages normally.
+    const assetsRes = await fetch(`${GATEWAY_URL}/v1/assets?pageSize=100`, {
       cache: "no-store",
       headers: authHeaders(),
     });

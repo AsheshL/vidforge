@@ -78,12 +78,18 @@ ECR repository.
 for scheduled/recurring job orchestration. Lowest priority of the unbuilt
 services.
 
-### 7. Asset list pagination
+### ~~7. Asset list pagination~~ Done
 
 `ListJobs` does real cursor pagination (ordered on `(submittedAt, id)`, last id
 as the page token, true `totalCount`). The asset listing does not:
 `apps/api-gateway/src/routes/assets.ts` takes a hardcoded `take: 100` with no
 page token and no total. Fine at current scale, wrong past ~100 assets per org.
+
+Done. `GET /v1/assets` now accepts `pageSize`/`pageToken` (same `[1, 100]`
+clamp, default 50, as `/v1/jobs`), orders on `(createdAt, id)` desc, and
+returns `pageInfo: { nextPageToken, totalCount }` via a Prisma `cursor`/`skip: 1`
+query paired with `prisma.asset.count`. `AssetsBoard.tsx` grew the same
+"N of total" / "Load more" UI `JobsBoard.tsx` already had for jobs.
 
 ### 8. Webhooks
 

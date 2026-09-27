@@ -90,3 +90,8 @@ export interface ProgressEvent {
 export interface ThumbnailsResponse {
   thumbnails: string[];
 }
+
+export interface PageInfo {
+  nextPageToken: string;
+  totalCount: number;
+}
