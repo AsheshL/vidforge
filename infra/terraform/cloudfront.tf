@@ -1,5 +1,5 @@
 # CloudFront in front of presigned S3 playback URLs (Phase 5 hardening
-# item, docs/backlog.md). api-gateway's playback routes
+# item, docs/aws-deployment.md). api-gateway's playback routes
 # (apps/api-gateway/src/routes/playback.ts) presign HLS playlist/segment
 # GETs against `process.env.S3_PUBLIC_ENDPOINT ?? process.env.S3_ENDPOINT`
 # — that env var is the seam this distribution plugs into (wired below in

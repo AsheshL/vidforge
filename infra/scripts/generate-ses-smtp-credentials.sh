@@ -3,8 +3,8 @@
 # access key, converts it to an SMTP password via AWS's documented SigV4
 # derivation, and writes the resulting SMTP_URL straight into Secrets
 # Manager. Deliberately NOT a Terraform resource: an IAM access key is a
-# long-lived credential, and this repo has no remote state backend yet
-# (docs/backlog.md), so it never touches local tfstate.
+# long-lived credential that would sit in plaintext in tfstate, so it
+# never touches Terraform state.
 #
 # Safe to re-run: an existing access key on the IAM user is deleted first,
 # so this always ends with exactly one live key and one matching secret.

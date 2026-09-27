@@ -37,8 +37,8 @@ resource "aws_iam_role" "github_deploy" {
 }
 
 # Deliberately does not touch Terraform state or need terraform in CI at
-# all: state is local-only (docs/backlog.md's "Terraform remote state"
-# item), so this role's permissions cover exactly what
+# all (CI deploys straight to ECS — docs/backlog.md's "Deploy through
+# Terraform" item), so this role's permissions cover exactly what
 # infra/scripts/ecs-register-revision.sh and the deploy workflow call —
 # ECR push, register a new task-definition revision, point a service or
 # a one-off migration run-task at it.
