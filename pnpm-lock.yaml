@@ -113,6 +113,40 @@ importers:
         specifier: ^1.6.1
         version: 1.6.1(@types/node@22.19.20)(lightningcss@1.32.0)
 
+  apps/jobs-svc:
+    dependencies:
+      '@grpc/grpc-js':
+        specifier: ^1.12.5
+        version: 1.14.4
+      '@vidforge/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@vidforge/grpc-health':
+        specifier: workspace:*
+        version: link:../../packages/grpc-health
+      '@vidforge/proto':
+        specifier: workspace:*
+        version: link:../../packages/proto
+      '@vidforge/queue':
+        specifier: workspace:*
+        version: link:../../packages/queue
+      '@vidforge/svc-auth':
+        specifier: workspace:^
+        version: link:../../packages/svc-auth
+      bullmq:
+        specifier: ^5.34.8
+        version: 5.78.0
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.22.4
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.1
+        version: 1.6.1(@types/node@22.19.20)(lightningcss@1.32.0)
+
   apps/metadata-svc:
     dependencies:
       '@grpc/grpc-js':

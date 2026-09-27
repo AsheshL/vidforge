@@ -1,0 +1,138 @@
+import Fastify from "fastify";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@vidforge/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@vidforge/db")>();
+  return {
+    ...actual,
+    prisma: {
+      ...actual.prisma,
+      asset: { findMany: vi.fn(), count: vi.fn() },
+    },
+  };
+});
+
+vi.mock("../auth.js", () => ({
+  // Bypasses the real gRPC round-trip to auth-svc; every request is
+  // authenticated as the same fake org so we can focus on pagination.
+  requireRole: () => async (req: { authContext?: unknown }) => {
+    req.authContext = { orgId: "org-1", userId: "user-1", roles: ["VIEWER"] };
+  },
+}));
+
+import { prisma } from "@vidforge/db";
+import { registerAssetRoutes } from "./assets.js";
+
+function buildApp() {
+  const app = Fastify();
+  registerAssetRoutes(app);
+  return app;
+}
+
+// Only the fields the route actually reads; findMany's mocked return type
+// is widened to match since the real payload also carries org/version/etc.
+function makeAsset(id: string): Awaited<ReturnType<typeof prisma.asset.findMany>>[number] {
+  return {
+    id,
+    title: `asset ${id}`,
+    status: "READY",
+    sourceStorageKey: "key",
+    sourceBytes: 1024n,
+    durationSeconds: 12,
+    createdBy: "user-1",
+    createdAt: new Date("2026-01-01T00:00:00Z"),
+    jobs: [],
+  } as unknown as Awaited<ReturnType<typeof prisma.asset.findMany>>[number];
+}
+
+describe("GET /v1/assets", () => {
+  it("clamps pageSize into [1, 100] with a default of 50, mirroring ListJobs", async () => {
+    vi.mocked(prisma.asset.findMany).mockResolvedValueOnce([]);
+    vi.mocked(prisma.asset.count).mockResolvedValueOnce(0);
+    const app = buildApp();
+
+    await app.inject({ method: "GET", url: "/v1/assets" });
+
+    expect(prisma.asset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: 50 }),
+    );
+
+    vi.mocked(prisma.asset.findMany).mockResolvedValueOnce([]);
+    vi.mocked(prisma.asset.count).mockResolvedValueOnce(0);
+    await app.inject({ method: "GET", url: "/v1/assets?pageSize=500" });
+    expect(prisma.asset.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({ take: 100 }),
+    );
+
+    vi.mocked(prisma.asset.findMany).mockResolvedValueOnce([]);
+    vi.mocked(prisma.asset.count).mockResolvedValueOnce(0);
+    await app.inject({ method: "GET", url: "/v1/assets?pageSize=-5" });
+    expect(prisma.asset.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({ take: 1 }),
+    );
+  });
+
+  it("orders by (createdAt, id) desc and scopes the query to the caller's org", async () => {
+    vi.mocked(prisma.asset.findMany).mockResolvedValueOnce([]);
+    vi.mocked(prisma.asset.count).mockResolvedValueOnce(0);
+    const app = buildApp();
+
+    await app.inject({ method: "GET", url: "/v1/assets" });
+
+    expect(prisma.asset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { orgId: "org-1" },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      }),
+    );
+    expect(prisma.asset.count).toHaveBeenCalledWith({ where: { orgId: "org-1" } });
+  });
+
+  it("forwards pageToken as a cursor with skip: 1, like ListJobs", async () => {
+    vi.mocked(prisma.asset.findMany).mockResolvedValueOnce([]);
+    vi.mocked(prisma.asset.count).mockResolvedValueOnce(0);
+    const app = buildApp();
+
+    await app.inject({ method: "GET", url: "/v1/assets?pageToken=asset-42" });
+
+    expect(prisma.asset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ cursor: { id: "asset-42" }, skip: 1 }),
+    );
+  });
+
+  it("returns nextPageToken as the last row's id only when the page is full, plus totalCount", async () => {
+    vi.mocked(prisma.asset.findMany).mockResolvedValueOnce([makeAsset("a1"), makeAsset("a2")]);
+    vi.mocked(prisma.asset.count).mockResolvedValueOnce(2);
+    const app = buildApp();
+
+    const full = await app.inject({ method: "GET", url: "/v1/assets?pageSize=2" });
+    expect(full.json().pageInfo).toEqual({ nextPageToken: "a2", totalCount: 2 });
+
+    vi.mocked(prisma.asset.findMany).mockResolvedValueOnce([makeAsset("a1")]);
+    vi.mocked(prisma.asset.count).mockResolvedValueOnce(1);
+    const partial = await app.inject({ method: "GET", url: "/v1/assets?pageSize=2" });
+    expect(partial.json().pageInfo).toEqual({ nextPageToken: "", totalCount: 1 });
+  });
+
+  it("maps asset fields and serializes BigInt sourceBytes to a number", async () => {
+    vi.mocked(prisma.asset.findMany).mockResolvedValueOnce([makeAsset("a1")]);
+    vi.mocked(prisma.asset.count).mockResolvedValueOnce(1);
+    const app = buildApp();
+
+    const res = await app.inject({ method: "GET", url: "/v1/assets" });
+
+    expect(res.json().assets).toEqual([
+      {
+        assetId: "a1",
+        title: "asset a1",
+        status: "READY",
+        sourceStorageKey: "key",
+        sourceBytes: 1024,
+        durationSeconds: 12,
+        createdBy: "user-1",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        latestCompletedJobId: null,
+      },
+    ]);
+  });
+});

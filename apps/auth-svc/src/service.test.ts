@@ -8,12 +8,17 @@ vi.mock("@vidforge/db", async (importOriginal) => {
     prisma: {
       ...actual.prisma,
       user: { findUnique: vi.fn() },
+      apiKey: { create: vi.fn(), update: vi.fn(), findUnique: vi.fn(), findMany: vi.fn() },
+      auditEvent: { create: vi.fn() },
     },
   };
 });
 
 import { prisma } from "@vidforge/db";
+import { Role } from "@vidforge/proto/auth";
+import { signContext } from "@vidforge/svc-auth";
 import { authServiceImpl } from "./service.js";
+import { hashPassword } from "./password.js";
 
 describe("signUp", () => {
   it("returns an INTERNAL grpc error instead of crashing the process when the database call fails", async () => {
@@ -60,5 +65,239 @@ describe("login", () => {
     expect(callback).toHaveBeenCalledTimes(1);
     const [err] = callback.mock.calls[0];
     expect(err).toMatchObject({ code: status.INTERNAL });
+  });
+});
+
+function ctxFor(roles: string[], overrides: Partial<{ userId: string; orgId: string }> = {}) {
+  return signContext({
+    userId: overrides.userId ?? "admin-1",
+    orgId: overrides.orgId ?? "org-1",
+    roles,
+    traceId: "t1",
+  });
+}
+
+describe("createApiKey", () => {
+  it("creates a key and returns the plaintext secret exactly once", async () => {
+    vi.mocked(prisma.apiKey.create).mockResolvedValueOnce({} as never);
+    vi.mocked(prisma.auditEvent.create).mockResolvedValueOnce({} as never);
+
+    const callback = vi.fn();
+    const call = {
+      request: { context: ctxFor(["ADMIN"]), name: "CI key", role: Role.ROLE_VIEWER, expiresAt: undefined },
+    } as Parameters<typeof authServiceImpl.createApiKey>[0];
+
+    await authServiceImpl.createApiKey(call, callback);
+
+    expect(callback).toHaveBeenCalledTimes(1);
+    const [err, res] = callback.mock.calls[0];
+    expect(err).toBeNull();
+    expect(res.keyId).toBeTruthy();
+    expect(res.secret).toMatch(/^vfk_/);
+    expect(prisma.apiKey.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          name: "CI key",
+          role: "VIEWER",
+          orgId: "org-1",
+          createdBy: "admin-1",
+        }),
+      }),
+    );
+  });
+
+  it("rejects a role above the creator's own", async () => {
+    const callback = vi.fn();
+    const call = {
+      request: { context: ctxFor(["VIEWER"]), name: "escalate", role: Role.ROLE_ADMIN, expiresAt: undefined },
+    } as Parameters<typeof authServiceImpl.createApiKey>[0];
+
+    await authServiceImpl.createApiKey(call, callback);
+
+    expect(callback).toHaveBeenCalledTimes(1);
+    const [err] = callback.mock.calls[0];
+    expect(err).toMatchObject({ code: status.PERMISSION_DENIED });
+    expect(prisma.apiKey.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("revokeApiKey", () => {
+  it("revokes an existing key that belongs to the caller's org", async () => {
+    vi.mocked(prisma.apiKey.findUnique).mockResolvedValueOnce({
+      id: "key-1",
+      orgId: "org-1",
+      revokedAt: null,
+    } as never);
+    vi.mocked(prisma.apiKey.update).mockResolvedValueOnce({} as never);
+    vi.mocked(prisma.auditEvent.create).mockResolvedValueOnce({} as never);
+
+    const callback = vi.fn();
+    const call = {
+      request: { context: ctxFor(["ADMIN"]), keyId: "key-1" },
+    } as Parameters<typeof authServiceImpl.revokeApiKey>[0];
+
+    await authServiceImpl.revokeApiKey(call, callback);
+
+    expect(callback).toHaveBeenCalledWith(null, { revoked: true });
+    expect(prisma.apiKey.update).toHaveBeenCalledWith({
+      where: { id: "key-1" },
+      data: { revokedAt: expect.any(Date) },
+    });
+  });
+
+  it("returns NOT_FOUND for a key belonging to a different org", async () => {
+    vi.mocked(prisma.apiKey.findUnique).mockResolvedValueOnce({
+      id: "key-2",
+      orgId: "some-other-org",
+      revokedAt: null,
+    } as never);
+
+    const callback = vi.fn();
+    const call = {
+      request: { context: ctxFor(["ADMIN"]), keyId: "key-2" },
+    } as Parameters<typeof authServiceImpl.revokeApiKey>[0];
+
+    await authServiceImpl.revokeApiKey(call, callback);
+
+    const [err] = callback.mock.calls[0];
+    expect(err).toMatchObject({ code: status.NOT_FOUND });
+    expect(prisma.apiKey.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("listApiKeys", () => {
+  it("lists an org's keys and never exposes secretHash", async () => {
+    vi.mocked(prisma.apiKey.findMany).mockResolvedValueOnce([
+      {
+        id: "key-1",
+        name: "CI",
+        role: "EDITOR",
+        createdBy: "admin-1",
+        secretHash: "scrypt:should-never:appear-in-response",
+        expiresAt: null,
+        revokedAt: null,
+        createdAt: new Date("2026-01-01T00:00:00Z"),
+        orgId: "org-1",
+      },
+    ] as never);
+
+    const callback = vi.fn();
+    const call = {
+      request: { context: ctxFor(["ADMIN"]), page: { pageSize: 50, pageToken: "" } },
+    } as Parameters<typeof authServiceImpl.listApiKeys>[0];
+
+    await authServiceImpl.listApiKeys(call, callback);
+
+    const [err, res] = callback.mock.calls[0];
+    expect(err).toBeNull();
+    expect(res.apiKeys).toHaveLength(1);
+    expect(res.apiKeys[0]).not.toHaveProperty("secretHash");
+    expect(res.apiKeys[0]).toMatchObject({ keyId: "key-1", name: "CI", createdBy: "admin-1" });
+    expect(JSON.stringify(res)).not.toContain("scrypt:should-never");
+  });
+});
+
+describe("verifyToken with API keys", () => {
+  it("accepts a valid, unexpired, unrevoked key", async () => {
+    const keyId = "key-abc";
+    const secret = `vfk_${keyId}_somerandom`;
+    const secretHash = await hashPassword(secret);
+    vi.mocked(prisma.apiKey.findUnique).mockResolvedValueOnce({
+      id: keyId,
+      secretHash,
+      role: "EDITOR",
+      orgId: "org-1",
+      createdBy: "user-1",
+      expiresAt: null,
+      revokedAt: null,
+      name: "x",
+      createdAt: new Date(),
+    } as never);
+
+    const callback = vi.fn();
+    await authServiceImpl.verifyToken(
+      { request: { token: secret } } as Parameters<typeof authServiceImpl.verifyToken>[0],
+      callback,
+    );
+
+    expect(callback).toHaveBeenCalledTimes(1);
+    const [err, res] = callback.mock.calls[0];
+    expect(err).toBeNull();
+    expect(res.valid).toBe(true);
+    expect(res.context).toMatchObject({ userId: "user-1", orgId: "org-1", roles: ["EDITOR"] });
+  });
+
+  it("rejects an expired key", async () => {
+    const keyId = "key-exp";
+    const secret = `vfk_${keyId}_somerandom`;
+    const secretHash = await hashPassword(secret);
+    vi.mocked(prisma.apiKey.findUnique).mockResolvedValueOnce({
+      id: keyId,
+      secretHash,
+      role: "EDITOR",
+      orgId: "org-1",
+      createdBy: "user-1",
+      expiresAt: new Date(Date.now() - 1000),
+      revokedAt: null,
+      name: "x",
+      createdAt: new Date(),
+    } as never);
+
+    const callback = vi.fn();
+    await authServiceImpl.verifyToken(
+      { request: { token: secret } } as Parameters<typeof authServiceImpl.verifyToken>[0],
+      callback,
+    );
+
+    expect(callback).toHaveBeenCalledWith(null, { valid: false, context: undefined, expiresAt: undefined });
+  });
+
+  it("rejects a revoked key", async () => {
+    const keyId = "key-rev";
+    const secret = `vfk_${keyId}_somerandom`;
+    const secretHash = await hashPassword(secret);
+    vi.mocked(prisma.apiKey.findUnique).mockResolvedValueOnce({
+      id: keyId,
+      secretHash,
+      role: "EDITOR",
+      orgId: "org-1",
+      createdBy: "user-1",
+      expiresAt: null,
+      revokedAt: new Date(),
+      name: "x",
+      createdAt: new Date(),
+    } as never);
+
+    const callback = vi.fn();
+    await authServiceImpl.verifyToken(
+      { request: { token: secret } } as Parameters<typeof authServiceImpl.verifyToken>[0],
+      callback,
+    );
+
+    expect(callback).toHaveBeenCalledWith(null, { valid: false, context: undefined, expiresAt: undefined });
+  });
+
+  it("rejects a well-formed key whose secret doesn't match the stored hash", async () => {
+    const keyId = "key-bad";
+    const secretHash = await hashPassword(`vfk_${keyId}_the-real-secret`);
+    vi.mocked(prisma.apiKey.findUnique).mockResolvedValueOnce({
+      id: keyId,
+      secretHash,
+      role: "EDITOR",
+      orgId: "org-1",
+      createdBy: "user-1",
+      expiresAt: null,
+      revokedAt: null,
+      name: "x",
+      createdAt: new Date(),
+    } as never);
+
+    const callback = vi.fn();
+    await authServiceImpl.verifyToken(
+      { request: { token: `vfk_${keyId}_wrong-secret` } } as Parameters<typeof authServiceImpl.verifyToken>[0],
+      callback,
+    );
+
+    expect(callback).toHaveBeenCalledWith(null, { valid: false, context: undefined, expiresAt: undefined });
   });
 });

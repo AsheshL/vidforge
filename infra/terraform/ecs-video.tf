@@ -75,6 +75,7 @@ resource "aws_ecs_task_definition" "video_svc_api" {
       ]
       secrets = [
         { name = "CONTEXT_SIGNING_SECRET", valueFrom = aws_secretsmanager_secret.context_signing_secret.arn },
+        { name = "CONTEXT_SIGNING_SECRET_PREVIOUS", valueFrom = aws_secretsmanager_secret.context_signing_secret_previous.arn },
         { name = "DATABASE_URL", valueFrom = aws_secretsmanager_secret.database_url.arn },
       ]
       logConfiguration = {
@@ -194,6 +195,7 @@ resource "aws_ecs_task_definition" "transcode_worker" {
       ]
       secrets = [
         { name = "CONTEXT_SIGNING_SECRET", valueFrom = aws_secretsmanager_secret.context_signing_secret.arn },
+        { name = "CONTEXT_SIGNING_SECRET_PREVIOUS", valueFrom = aws_secretsmanager_secret.context_signing_secret_previous.arn },
         { name = "DATABASE_URL", valueFrom = aws_secretsmanager_secret.database_url.arn },
       ]
       logConfiguration = {

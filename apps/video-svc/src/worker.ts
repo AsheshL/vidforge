@@ -84,14 +84,18 @@ export function startWorker() {
     });
     if (completed.count === 0) return result;
 
-    await prisma.asset.update({
-      where: { id: job.data.assetId },
-      data: {
-        status: "READY",
-        playbackUrl: `s3://${process.env.S3_BUCKET ?? "vidforge-media"}/${result.playlistStorageKey}`,
-        durationSeconds: result.sourceDurationSeconds,
-      },
-    });
+    // A thumbnails-only job (GenerateThumbnails RPC) has no renditions and
+    // so no playlist; the asset's playback state is untouched.
+    if (result.playlistStorageKey) {
+      await prisma.asset.update({
+        where: { id: job.data.assetId },
+        data: {
+          status: "READY",
+          playbackUrl: `s3://${process.env.S3_BUCKET ?? "vidforge-media"}/${result.playlistStorageKey}`,
+          durationSeconds: result.sourceDurationSeconds,
+        },
+      });
+    }
 
     return result;
   });
