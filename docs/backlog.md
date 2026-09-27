@@ -171,11 +171,16 @@ redeployed, rollback check — completed clean.
   DynamoDB table. The CI/CD pipeline above still talks to ECS directly
   rather than running `terraform apply`, though — that would be a separate
   follow-up now that state is actually reachable from CI.
-- **Secret rotation.** `JWT_SECRET` and `CONTEXT_SIGNING_SECRET` are generated
-  once by Terraform into Secrets Manager with no rotation path. Rotating
-  `CONTEXT_SIGNING_SECRET` in particular needs thought: every service must
-  accept both the old and new secret during the rollout window, which the
-  verifier does not currently support.
+- ~~**Secret rotation.**~~ Done. `verifyContext` (`packages/svc-auth/src/index.ts`)
+  and `verifyJwt` (`apps/auth-svc/src/jwt.ts`) now accept a signature/token
+  produced by either the current secret or an optional `*_PREVIOUS` one
+  (`CONTEXT_SIGNING_SECRET_PREVIOUS`, `JWT_SECRET_PREVIOUS`); signing still
+  only ever uses the current secret. `infra/terraform/secrets.tf` holds a
+  `*-previous` Secrets Manager secret per rotated secret (starts empty,
+  `ignore_changes` on `secret_string` so `apply` can't clobber a manual
+  rotation), wired into every ECS task definition that consumes them
+  (`ecs-auth.tf`, `ecs-gateway.tf`, `ecs-video.tf`). Manual rotation
+  procedure documented in `infra/terraform/README-secret-rotation.md`.
 - **Backups and DR.** RDS keeps 7 days of automated backups, but there is no
   documented restore procedure, no tested restore, and no
   lifecycle/replication policy on the media bucket.

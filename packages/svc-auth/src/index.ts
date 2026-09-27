@@ -4,14 +4,26 @@ import type { RequestContext } from "@vidforge/proto/common";
 // Shared between the gateway (signer) and internal services (verifiers).
 // Must differ from JWT_SECRET so a leaked user token can never be replayed
 // as a service-to-service credential.
-const SECRET = process.env.CONTEXT_SIGNING_SECRET ?? "";
+//
+// CONTEXT_SIGNING_SECRET_PREVIOUS is optional and only ever used to verify
+// (never to sign). During a secret rotation, the old value is moved there so
+// contexts signed by not-yet-redeployed gateway instances still verify
+// against downstream services that already picked up the new current
+// secret. Read lazily (not cached at module load) so tests can flip
+// process.env between cases; in production these are set once at process
+// start anyway.
 const MAX_AGE_MS = 5 * 60 * 1000;
 
-function requireSecret(): string {
-  if (!SECRET) {
+function currentSecret(): string {
+  const secret = process.env.CONTEXT_SIGNING_SECRET ?? "";
+  if (!secret) {
     throw new Error("CONTEXT_SIGNING_SECRET is not set");
   }
-  return SECRET;
+  return secret;
+}
+
+function previousSecret(): string | undefined {
+  return process.env.CONTEXT_SIGNING_SECRET_PREVIOUS || undefined;
 }
 
 // Canonical payload: every identity field the services rely on. Roles are
@@ -27,13 +39,13 @@ function payload(ctx: RequestContext, issuedAtMs: number): string {
   ].join("\n");
 }
 
-function hmac(data: string): Buffer {
-  return createHmac("sha256", requireSecret()).update(data).digest();
+function hmac(secret: string, data: string): Buffer {
+  return createHmac("sha256", secret).update(data).digest();
 }
 
 export function signContext(ctx: Omit<RequestContext, "issuedAtMs" | "signature">): RequestContext {
   const issuedAtMs = Date.now();
-  const signature = hmac(payload(ctx as RequestContext, issuedAtMs)).toString("hex");
+  const signature = hmac(currentSecret(), payload(ctx as RequestContext, issuedAtMs)).toString("hex");
   return { ...ctx, issuedAtMs, signature };
 }
 
@@ -52,15 +64,20 @@ export function verifyContext(ctx: RequestContext | undefined): ContextVerificat
   if (age > MAX_AGE_MS || age < -MAX_AGE_MS) {
     return { ok: false, reason: "request context expired" };
   }
-  const expected = hmac(payload(ctx, Number(ctx.issuedAtMs)));
+  const data = payload(ctx, Number(ctx.issuedAtMs));
   let actual: Buffer;
   try {
     actual = Buffer.from(ctx.signature, "hex");
   } catch {
     return { ok: false, reason: "malformed context signature" };
   }
-  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
-    return { ok: false, reason: "invalid context signature" };
+
+  const candidates = [currentSecret(), previousSecret()].filter((s): s is string => Boolean(s));
+  for (const secret of candidates) {
+    const expected = hmac(secret, data);
+    if (actual.length === expected.length && timingSafeEqual(actual, expected)) {
+      return { ok: true, context: ctx };
+    }
   }
-  return { ok: true, context: ctx };
+  return { ok: false, reason: "invalid context signature" };
 }

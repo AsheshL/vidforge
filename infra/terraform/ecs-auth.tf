@@ -40,7 +40,9 @@ resource "aws_ecs_task_definition" "auth_svc" {
       ]
       secrets = [
         { name = "JWT_SECRET", valueFrom = aws_secretsmanager_secret.jwt_secret.arn },
+        { name = "JWT_SECRET_PREVIOUS", valueFrom = aws_secretsmanager_secret.jwt_secret_previous.arn },
         { name = "CONTEXT_SIGNING_SECRET", valueFrom = aws_secretsmanager_secret.context_signing_secret.arn },
+        { name = "CONTEXT_SIGNING_SECRET_PREVIOUS", valueFrom = aws_secretsmanager_secret.context_signing_secret_previous.arn },
         { name = "DATABASE_URL", valueFrom = aws_secretsmanager_secret.database_url.arn },
         { name = "SMTP_URL", valueFrom = aws_secretsmanager_secret.smtp_url.arn },
       ]
