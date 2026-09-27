@@ -24,28 +24,26 @@ then point the gateway at it. Note the ECS/Terraform work does not provision
 metadata-svc; adding it means a task definition, service, Cloud Map entry, and
 ECR repository.
 
-### 2. Webhooks: registration UI and deployment
+### 2. Webhooks: AWS deployment
 
-Delivery works end to end in local dev. `apps/jobs-svc` registers, lists and
-deletes webhooks (`RegisterWebhook` and friends). video-svc publishes
-ENQUEUED/STARTED/COMPLETED/RETRYING/FAILED at each job state transition onto
-`WEBHOOK_QUEUE` (`packages/webhooks` `createWebhookPublisher`), and a worker
+Webhooks work end to end locally. Admins register them on the org page
+(`apps/web/components/WebhooksPanel.tsx` → gateway `/v1/org/webhooks` →
+jobs-svc `RegisterWebhook`, which reveals the signing secret once).
+video-svc publishes ENQUEUED/STARTED/COMPLETED/RETRYING/FAILED at each job
+state transition onto `WEBHOOK_QUEUE` (`packages/webhooks`), and a worker
 inside jobs-svc delivers them. Each delivery is signed
-(`vidforge-signature: t=…,v1=<HMAC-SHA256 of "t.body">`,
+(`vidforge-signature: t=…,v1=<HMAC-SHA256 of "t.body">`;
 `verifyWebhookSignature` is the receiver-side check), retried with backoff
 on network errors/408/429/5xx, refused for private or reserved targets, and
-deduplicated per (webhook, event).
+deduplicated per (webhook, event). jobs-svc also runs in
+`docker-compose.prod.yml`.
 
 Remaining:
 
-- **Gateway + UI.** The gateway has no jobs-svc client, so nothing outside
-  the cluster can reach the RPCs yet. Add `JOBS_SVC_ADDR` and ADMIN-only
-  `GET/POST/DELETE /v1/org/webhooks` routes (same shape as the API-key
-  routes in `apps/api-gateway/src/routes/org.ts`), then a `WebhooksPanel`
-  on the org page, modeled on `ApiKeysPanel.tsx`.
-- **Deploy jobs-svc.** It is in neither `docker-compose.prod.yml` nor
-  Terraform: it needs an ECR repo, a task definition (with the ADOT
-  sidecar), a service, a Cloud Map entry, and a sixth image in
+- **Deploy jobs-svc on AWS.** It isn't in Terraform: it needs an ECR repo, a
+  task definition (with the ADOT sidecar, `CONTEXT_SIGNING_SECRET`,
+  `DATABASE_URL`, `REDIS_URL`), a service, a Cloud Map entry, and
+  `JOBS_SVC_ADDR` on the gateway task, plus a sixth image in
   `infra/scripts/build-and-push.sh` and the CI deploy.
 - **Auto-disable (optional).** A webhook that keeps failing keeps getting
   events. Tracking consecutive failures and setting `active=false` past a

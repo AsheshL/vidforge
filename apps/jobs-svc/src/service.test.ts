@@ -190,6 +190,9 @@ describe("registerWebhook", () => {
 
     const created = vi.mocked(prisma.webhook.create).mock.calls[0][0] as { data: Record<string, unknown> };
     expect(String(created.data.signingSecret).endsWith(res.signingSecretHint)).toBe(true);
+    // The one time the full secret is revealed.
+    expect(res.signingSecret).toBe(created.data.signingSecret);
+    expect(res.signingSecret).toMatch(/^whsec_[0-9a-f]{48}$/);
     expect(created.data.events).toEqual(["QUEUE_EVENT_TYPE_COMPLETED", "QUEUE_EVENT_TYPE_FAILED"]);
     expect(created.data.orgId).toBe("org-1");
   });
@@ -218,6 +221,7 @@ describe("listWebhooks", () => {
     expect(err).toBeNull();
     expect(res.webhooks).toHaveLength(1);
     expect(res.webhooks[0].signingSecretHint).toBe("1234");
+    expect(res.webhooks[0].signingSecret).toBe("");
     expect(res.webhooks[0].events).toEqual([QueueEventType.QUEUE_EVENT_TYPE_COMPLETED]);
   });
 });

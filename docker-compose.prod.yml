@@ -40,7 +40,9 @@ services:
     image: redis:7
 
   minio:
-    image: minio/minio
+    # minio/minio is no longer published to Docker Hub; pgsty/minio is a
+    # maintained community build of the same server (mc included).
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: vidforge
@@ -109,6 +111,20 @@ services:
       minio:
         condition: service_started
 
+  # Webhook registration RPCs and the webhook delivery worker.
+  jobs-svc:
+    build:
+      context: .
+      dockerfile: apps/jobs-svc/Dockerfile
+    environment: *app-env
+    init: true
+    stop_grace_period: 30s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+
   api-gateway:
     build:
       context: .
@@ -117,6 +133,7 @@ services:
       <<: *app-env
       AUTH_SVC_ADDR: auth-svc:50053
       VIDEO_SVC_ADDR: video-svc:50051
+      JOBS_SVC_ADDR: jobs-svc:50054
       WEB_ORIGIN: http://localhost:3100
       # TRUST_PROXY stays unset: here the gateway is published straight to
       # the host, so honouring X-Forwarded-For would let any caller spoof
@@ -132,6 +149,8 @@ services:
       auth-svc:
         condition: service_healthy
       video-svc:
+        condition: service_healthy
+      jobs-svc:
         condition: service_healthy
 
   web:
