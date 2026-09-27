@@ -40,7 +40,9 @@ services:
     image: redis:7
 
   minio:
-    image: minio/minio
+    # minio/minio is no longer published to Docker Hub; pgsty/minio is a
+    # maintained community build of the same server (mc included).
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: vidforge
