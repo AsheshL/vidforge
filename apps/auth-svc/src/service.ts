@@ -3,7 +3,7 @@ import { prisma, Role as DbRole } from "@vidforge/db";
 import { Role, type AuthServiceServer, type User as ProtoUser } from "@vidforge/proto/auth";
 import type { RequestContext } from "@vidforge/proto/common";
 import { verifyContext } from "@vidforge/svc-auth";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { signToken, verifyJwt } from "./jwt.js";
 import { hashPassword, verifyPassword } from "./password.js";
 import { sendInviteEmail } from "./mailer.js";
@@ -12,6 +12,24 @@ const TEMP_PASSWORD_TTL_HOURS = Number(process.env.TEMP_PASSWORD_TTL_HOURS ?? 24
 const WEB_URL = process.env.WEB_ORIGIN ?? "http://localhost:3000";
 
 const ROLE_RANK: Record<string, number> = { VIEWER: 1, EDITOR: 2, ADMIN: 3, OWNER: 4 };
+
+// Issued API keys are prefixed so verifyToken can tell them apart from a JWT
+// (which never starts this way) without touching the database. The key id
+// rides in the token itself — vfk_<keyId>_<random> — so lookup is a single
+// indexed findUnique rather than a scan of every non-revoked key; the token
+// (in full) is then hashed with the same scrypt scheme as passwords and
+// checked against the stored hash.
+const API_KEY_PREFIX = "vfk_";
+
+function generateApiKey(keyId: string): string {
+  return `${API_KEY_PREFIX}${keyId}_${randomBytes(32).toString("base64url")}`;
+}
+
+function apiKeyIdFromToken(token: string): string | null {
+  const rest = token.slice(API_KEY_PREFIX.length);
+  const sep = rest.indexOf("_");
+  return sep > 0 ? rest.slice(0, sep) : null;
+}
 
 function grpcError(code: status, message: string): ServiceError {
   return Object.assign(new Error(message), { code, details: message }) as ServiceError;
@@ -52,6 +70,40 @@ function toProtoUser(u: {
 
 export const authServiceImpl: AuthServiceServer = {
   verifyToken: async (call, callback) => {
+    const token = call.request.token;
+    if (token.startsWith(API_KEY_PREFIX)) {
+      try {
+        const keyId = apiKeyIdFromToken(token);
+        const key = keyId ? await prisma.apiKey.findUnique({ where: { id: keyId } }) : null;
+        const now = new Date();
+        if (
+          !key ||
+          key.revokedAt ||
+          (key.expiresAt && key.expiresAt < now) ||
+          !(await verifyPassword(token, key.secretHash))
+        ) {
+          return callback(null, { valid: false, context: undefined, expiresAt: undefined });
+        }
+        callback(null, {
+          valid: true,
+          context: {
+            // A key has no user of its own; downstream consumers (audit
+            // attribution, org-scoping checks) just need a real user id in
+            // this org, so we attribute the request to whoever created it.
+            userId: key.createdBy,
+            orgId: key.orgId,
+            roles: [key.role],
+            traceId: "",
+            issuedAtMs: 0,
+            signature: "",
+          },
+          expiresAt: key.expiresAt ?? undefined,
+        });
+      } catch {
+        callback(null, { valid: false, context: undefined, expiresAt: undefined });
+      }
+      return;
+    }
     try {
       const claims = await verifyJwt(call.request.token);
       // Role and org come fresh from the DB, not the token, so role
@@ -379,8 +431,100 @@ export const authServiceImpl: AuthServiceServer = {
     });
   },
 
-  createApiKey: (_call, callback) =>
-    callback(grpcError(status.UNIMPLEMENTED, "CreateApiKey not implemented yet")),
-  revokeApiKey: (_call, callback) =>
-    callback(grpcError(status.UNIMPLEMENTED, "RevokeApiKey not implemented yet")),
+  createApiKey: async (call, callback) => {
+    const ctx = authenticate(call.request.context);
+    if (ctx instanceof Error) return callback(ctx);
+    const name = call.request.name.trim();
+    if (!name) {
+      return callback(grpcError(status.INVALID_ARGUMENT, "name is required"));
+    }
+    const roleName = Role[call.request.role]?.replace("ROLE_", "") as DbRole | undefined;
+    if (!roleName || !(roleName in ROLE_RANK)) {
+      return callback(grpcError(status.INVALID_ARGUMENT, "invalid role"));
+    }
+    const creatorRank = Math.max(...ctx.roles.map((r) => ROLE_RANK[r] ?? 0), 0);
+    if (ROLE_RANK[roleName] > creatorRank) {
+      return callback(grpcError(status.PERMISSION_DENIED, "cannot create a key with a role above your own"));
+    }
+    try {
+      const keyId = randomUUID();
+      const secret = generateApiKey(keyId);
+      const secretHash = await hashPassword(secret);
+      await prisma.apiKey.create({
+        data: {
+          id: keyId,
+          name,
+          secretHash,
+          role: roleName,
+          orgId: ctx.orgId,
+          createdBy: ctx.userId,
+          expiresAt: call.request.expiresAt ?? null,
+        },
+      });
+      await prisma.auditEvent.create({
+        data: {
+          orgId: ctx.orgId,
+          actorUserId: ctx.userId,
+          action: "apikey.create",
+          resourceType: "api_key",
+          resourceId: keyId,
+          detailJson: { name, role: roleName },
+        },
+      });
+      // The plaintext secret is returned exactly once here — it is never
+      // stored (only its hash is) and must never be logged.
+      callback(null, { keyId, secret });
+    } catch (err) {
+      callback(grpcError(status.INTERNAL, `failed to create api key: ${(err as Error).message}`));
+    }
+  },
+
+  revokeApiKey: async (call, callback) => {
+    const ctx = authenticate(call.request.context);
+    if (ctx instanceof Error) return callback(ctx);
+    try {
+      const key = await prisma.apiKey.findUnique({ where: { id: call.request.keyId } });
+      if (!key || key.orgId !== ctx.orgId) {
+        return callback(grpcError(status.NOT_FOUND, "api key not found"));
+      }
+      if (!key.revokedAt) {
+        await prisma.apiKey.update({ where: { id: key.id }, data: { revokedAt: new Date() } });
+        await prisma.auditEvent.create({
+          data: {
+            orgId: ctx.orgId,
+            actorUserId: ctx.userId,
+            action: "apikey.revoke",
+            resourceType: "api_key",
+            resourceId: key.id,
+          },
+        });
+      }
+      callback(null, { revoked: true });
+    } catch (err) {
+      callback(grpcError(status.INTERNAL, `failed to revoke api key: ${(err as Error).message}`));
+    }
+  },
+
+  listApiKeys: async (call, callback) => {
+    const ctx = authenticate(call.request.context);
+    if (ctx instanceof Error) return callback(ctx);
+    const keys = await prisma.apiKey.findMany({
+      where: { orgId: ctx.orgId },
+      orderBy: { createdAt: "desc" },
+      take: Math.min(call.request.page?.pageSize || 50, 100),
+    });
+    callback(null, {
+      // secretHash never leaves this service.
+      apiKeys: keys.map((k) => ({
+        keyId: k.id,
+        name: k.name,
+        role: ROLE_MAP[k.role],
+        createdBy: k.createdBy,
+        expiresAt: k.expiresAt ?? undefined,
+        revokedAt: k.revokedAt ?? undefined,
+        createdAt: k.createdAt,
+      })),
+      pageInfo: { nextPageToken: "", totalCount: keys.length },
+    });
+  },
 };
