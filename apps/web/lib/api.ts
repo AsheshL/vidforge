@@ -86,3 +86,7 @@ export interface ProgressEvent {
   percent: number;
   currentRendition: string;
 }
+
+export interface ThumbnailsResponse {
+  thumbnails: string[];
+}
