@@ -11,6 +11,8 @@ import {
   type Job,
   type ProgressEvent,
 } from "@/lib/api";
+import { getRenditionPreset } from "@/lib/renditionPresets";
+import { RenditionPicker } from "./RenditionPicker";
 import { SeedButton } from "./SeedButton";
 
 const ACTIVE = (state: number) => state === 1 || state === 2;
@@ -43,9 +45,13 @@ export function JobsBoard() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [pageInfo, setPageInfo] = useState({ nextPageToken: "", totalCount: 0 });
   const [loadingMore, setLoadingMore] = useState(false);
-  const [assetTitles, setAssetTitles] = useState<Record<string, string>>({});
+  const [assets, setAssets] = useState<Record<string, { title: string; sourceStorageKey: string | null }>>(
+    {},
+  );
   // Live progress per jobId, layered over the polled job list.
   const [live, setLive] = useState<Record<string, ProgressEvent>>({});
+  // assetId of the completed job currently showing the re-run rendition picker.
+  const [rerunJobId, setRerunJobId] = useState<string | null>(null);
   const sources = useRef<Map<string, EventSource>>(new Map());
 
   const refresh = useCallback(async () => {
@@ -70,9 +76,14 @@ export function JobsBoard() {
     });
     if (assetsRes.ok) {
       const data = await assetsRes.json();
-      setAssetTitles(
+      setAssets(
         Object.fromEntries(
-          (data.assets ?? []).map((a: { assetId: string; title: string }) => [a.assetId, a.title]),
+          (data.assets ?? []).map(
+            (a: { assetId: string; title: string; sourceStorageKey: string | null }) => [
+              a.assetId,
+              { title: a.title, sourceStorageKey: a.sourceStorageKey },
+            ],
+          ),
         ),
       );
     }
@@ -118,12 +129,42 @@ export function JobsBoard() {
     await refresh();
   }
 
+  // Re-runs a finished job's asset through the transcode pipeline with a
+  // (possibly different) rendition profile. Same endpoint AssetsBoard uses.
+  async function rerun(job: Job, presetId: string) {
+    setActionError(null);
+    const sourceStorageKey = assets[job.assetId]?.sourceStorageKey;
+    if (!sourceStorageKey) {
+      setActionError("source file is no longer available for this asset");
+      return;
+    }
+    const res = await fetch(`${GATEWAY_URL}/v1/assets/${job.assetId}/transcode`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...authHeaders() },
+      body: JSON.stringify({
+        sourceStorageKey,
+        renditions: getRenditionPreset(presetId).renditions,
+        hlsSegmentSeconds: 6,
+        generateThumbnails: true,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setActionError(typeof body?.error === "string" ? body.error : `re-run failed: ${res.status}`);
+      return;
+    }
+    await refresh();
+  }
+
   // Mirrors the server-side rule (creator or admin) to avoid showing
   // buttons that would only 403; the server still enforces it.
   const me = getStoredUser();
   const canModify = (job: Job) =>
     !!me &&
     (job.createdByUserId === me.userId || me.role === "ADMIN" || me.role === "OWNER");
+  // Re-running is a transcode submission, gated by role (EDITOR+) on the
+  // gateway, same as the "Transcode" action in AssetsBoard.
+  const canEdit = me?.role === "EDITOR" || me?.role === "ADMIN" || me?.role === "OWNER";
 
   // Subscribe to SSE for every active job; tear down when terminal.
   useEffect(() => {
@@ -220,7 +261,7 @@ export function JobsBoard() {
               return (
                 <tr key={job.jobId} className="bg-slate-950">
                   <td className="px-4 py-3 text-slate-300">
-                    {assetTitles[job.assetId] ?? job.assetId.slice(-8)}
+                    {assets[job.assetId]?.title ?? job.assetId.slice(-8)}
                   </td>
                   <td className={`px-4 py-3 font-medium ${meta.color}`}>
                     {meta.label}
@@ -252,32 +293,51 @@ export function JobsBoard() {
                     {formatSubmitted(job.submittedAt)}
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-1.5">
-                      {state === 3 && (
-                        <a
-                          href={`/watch/${job.jobId}`}
-                          className="rounded bg-slate-800 px-2 py-1 text-xs font-medium text-sky-400 hover:bg-slate-700"
-                        >
-                          ▶ Play
-                        </a>
-                      )}
-                      {(state === 1 || state === 2) && canModify(job) && (
-                        <button
-                          onClick={() => void jobAction(job.jobId, "cancel")}
-                          className="rounded bg-slate-800 px-2 py-1 text-xs font-medium text-amber-400 hover:bg-slate-700"
-                        >
-                          Cancel
-                        </button>
-                      )}
-                      {state >= 3 && canModify(job) && (
-                        <button
-                          onClick={() => void jobAction(job.jobId, "delete")}
-                          className="rounded bg-slate-800 px-2 py-1 text-xs font-medium text-rose-400 hover:bg-slate-700"
-                        >
-                          Delete
-                        </button>
-                      )}
-                    </div>
+                    {rerunJobId === job.jobId ? (
+                      <RenditionPicker
+                        submitLabel="Re-run"
+                        onSubmit={(presetId) => {
+                          setRerunJobId(null);
+                          void rerun(job, presetId);
+                        }}
+                        onCancel={() => setRerunJobId(null)}
+                      />
+                    ) : (
+                      <div className="flex items-center justify-end gap-1.5">
+                        {state === 3 && (
+                          <a
+                            href={`/watch/${job.jobId}`}
+                            className="rounded bg-slate-800 px-2 py-1 text-xs font-medium text-sky-400 hover:bg-slate-700"
+                          >
+                            ▶ Play
+                          </a>
+                        )}
+                        {state === 3 && canEdit && (
+                          <button
+                            onClick={() => setRerunJobId(job.jobId)}
+                            className="rounded bg-slate-800 px-2 py-1 text-xs font-medium text-emerald-400 hover:bg-slate-700"
+                          >
+                            Re-run
+                          </button>
+                        )}
+                        {(state === 1 || state === 2) && canModify(job) && (
+                          <button
+                            onClick={() => void jobAction(job.jobId, "cancel")}
+                            className="rounded bg-slate-800 px-2 py-1 text-xs font-medium text-amber-400 hover:bg-slate-700"
+                          >
+                            Cancel
+                          </button>
+                        )}
+                        {state >= 3 && canModify(job) && (
+                          <button
+                            onClick={() => void jobAction(job.jobId, "delete")}
+                            className="rounded bg-slate-800 px-2 py-1 text-xs font-medium text-rose-400 hover:bg-slate-700"
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </td>
                 </tr>
               );

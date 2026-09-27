@@ -21,14 +21,15 @@ Remaining: serve the keys through the existing presigned-URL path (the same
 mechanism `apps/api-gateway/src/routes/playback.ts` uses for segments) and
 render them as asset posters / a scrubbing strip.
 
-### 2. Re-run a job with a different rendition profile
+### ~~2. Re-run a job with a different rendition profile~~ Done
 
-`SubmitTranscodeJob` accepts an arbitrary profile, but the dashboard hardcodes
-one: 720p + 360p, in `apps/web/components/AssetsBoard.tsx`. There is no way to
-re-transcode an asset at different settings from the UI.
-
-Remaining: a rendition picker on the transcode action, and a "re-run" entry
-point from a finished job. No backend change needed.
+`SubmitTranscodeJob` already accepted an arbitrary profile; the dashboard just
+hardcoded one (720p + 360p). `apps/web/lib/renditionPresets.ts` now defines a
+small set of named presets (720p+360p, 1080p+720p+360p, 480p-only), surfaced
+via a shared `RenditionPicker` dropdown (`apps/web/components/RenditionPicker.tsx`)
+used in two places: the "Transcode" action in `AssetsBoard.tsx`, and a new
+"Re-run" action on completed jobs in `JobsBoard.tsx`, both posting to the same
+`/v1/assets/:assetId/transcode` endpoint. No backend change needed.
 
 ### 3. API keys
 
