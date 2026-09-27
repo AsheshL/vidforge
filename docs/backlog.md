@@ -30,18 +30,21 @@ re-transcode an asset at different settings from the UI.
 Remaining: a rendition picker on the transcode action, and a "re-run" entry
 point from a finished job. No backend change needed.
 
-### 3. API keys
+### ~~3. API keys~~ Done
 
-`CreateApiKey` and `RevokeApiKey` are `UNIMPLEMENTED` stubs in
-`apps/auth-svc/src/service.ts`. The `ApiKey` model already exists in the schema
-with everything needed — `secretHash`, `role`, `orgId`, `createdBy`,
-`expiresAt`, `revokedAt` — but nothing issues, stores, or accepts one, and
-`VerifyToken` only understands JWTs.
-
-Remaining: generate a key with a displayed-once secret, hash it the way
-passwords are hashed (`apps/auth-svc/src/password.ts`), teach `VerifyToken` to
-accept a key in place of a JWT (honouring `expiresAt`/`revokedAt`), and add
-management UI. This is what unblocks server-to-server and CI callers.
+`CreateApiKey` and `RevokeApiKey` are implemented in
+`apps/auth-svc/src/service.ts`, alongside a new `ListApiKeys` RPC
+(`packages/proto/src/auth.proto`) for the management UI. Issued keys are
+`vfk_<keyId>_<random>` strings — the prefix lets `VerifyToken` tell a key from
+a JWT without a database round trip, and the embedded key id turns lookup into
+an indexed `findUnique` rather than a scan; the full string is then hashed
+with the same scrypt scheme as passwords (`apps/auth-svc/src/password.ts`) and
+compared with `verifyPassword`. `VerifyToken` honours `expiresAt`/`revokedAt`,
+and a key's `RequestContext.userId` is its creator's id (a key has no user of
+its own, but audit attribution and org-scoping need a real one). A key's role
+cannot exceed its creator's role. Management UI lives in
+`apps/web/components/ApiKeysPanel.tsx` (create, one-time secret reveal with
+copy, list, revoke), rendered on the org settings page.
 
 ### ~~4. Standalone `GenerateThumbnails` RPC~~ Done
 

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { OrgPanel } from "@/components/OrgPanel";
+import { ApiKeysPanel } from "@/components/ApiKeysPanel";
 
 export default function OrgPage() {
   return (
@@ -22,6 +23,10 @@ export default function OrgPage() {
         </div>
       </header>
       <OrgPanel />
+      <section className="flex flex-col gap-3">
+        <h2 className="text-xl font-semibold tracking-tight">API keys</h2>
+        <ApiKeysPanel />
+      </section>
     </main>
   );
 }

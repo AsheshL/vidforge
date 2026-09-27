@@ -28,6 +28,7 @@ service AuthService {
   rpc IssueDevToken(IssueDevTokenRequest) returns (IssueDevTokenResponse);
   rpc CreateApiKey(CreateApiKeyRequest) returns (CreateApiKeyResponse);
   rpc RevokeApiKey(RevokeApiKeyRequest) returns (RevokeApiKeyResponse);
+  rpc ListApiKeys(ListApiKeysRequest) returns (ListApiKeysResponse);
 
   rpc GetUser(GetUserRequest) returns (User);
   rpc ListOrgMembers(ListOrgMembersRequest) returns (ListOrgMembersResponse);
@@ -127,6 +128,27 @@ message RevokeApiKeyRequest {
 
 message RevokeApiKeyResponse {
   bool revoked = 1;
+}
+
+message ListApiKeysRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  vidforge.common.v1.PageRequest page = 2;
+}
+
+message ApiKeyInfo {
+  string key_id = 1;
+  string name = 2;
+  Role role = 3;
+  string created_by = 4;
+  google.protobuf.Timestamp expires_at = 5;
+  google.protobuf.Timestamp revoked_at = 6;
+  google.protobuf.Timestamp created_at = 7;
+  // secret/secretHash are never returned once the key is created.
+}
+
+message ListApiKeysResponse {
+  repeated ApiKeyInfo api_keys = 1;
+  vidforge.common.v1.PageInfo page_info = 2;
 }
 
 message GetUserRequest {
