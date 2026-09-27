@@ -2,7 +2,8 @@ import { status, type ServiceError } from "@grpc/grpc-js";
 import { QueueEvents } from "bullmq";
 import { randomBytes } from "node:crypto";
 import { prisma } from "@vidforge/db";
-import { createRedis, createTranscodeQueue, TRANSCODE_QUEUE } from "@vidforge/queue";
+import { createRedis, createTranscodeQueue, TRANSCODE_QUEUE, WEBHOOK_EVENT_TYPES } from "@vidforge/queue";
+import { targetPolicyFromEnv, validateWebhookUrl } from "@vidforge/webhooks";
 import {
   QueueEventType,
   queueEventTypeFromJSON,
@@ -193,13 +194,22 @@ export const jobQueueServiceImpl: JobQueueServiceServer = {
     const ctx = authenticate(call.request.context);
     if (ctx instanceof Error) return callback(ctx);
     const { url, events } = call.request;
-    if (!/^https?:\/\//.test(url)) {
-      return callback(grpcError(status.INVALID_ARGUMENT, "url must be an http(s) URL"));
+    try {
+      // Same checks the delivery worker re-applies before every send; the
+      // DNS-level ones can only happen at delivery time.
+      validateWebhookUrl(url, targetPolicyFromEnv());
+    } catch (err) {
+      return callback(grpcError(status.INVALID_ARGUMENT, (err as Error).message));
     }
-    const validEvents = events.filter(
-      (e) => e !== QueueEventType.QUEUE_EVENT_TYPE_UNSPECIFIED && e !== QueueEventType.UNRECOGNIZED,
-    );
-    if (!validEvents.length) {
+    const names = events.map((e) => QueueEventType[e]);
+    const unsupported = names.filter((n) => !(WEBHOOK_EVENT_TYPES as readonly string[]).includes(n));
+    if (unsupported.length) {
+      // PROGRESS fires many times per job; it's served by StreamQueueEvents.
+      return callback(
+        grpcError(status.INVALID_ARGUMENT, `event types not deliverable by webhook: ${unsupported.join(", ")}`),
+      );
+    }
+    if (!names.length) {
       return callback(grpcError(status.INVALID_ARGUMENT, "at least one event type is required"));
     }
     // Shown in full to the caller exactly once; only the hint (last 4
@@ -209,7 +219,7 @@ export const jobQueueServiceImpl: JobQueueServiceServer = {
       data: {
         orgId: ctx.orgId,
         url,
-        events: validEvents.map((e) => QueueEventType[e]),
+        events: [...new Set(names)],
         signingSecret,
         active: true,
       },
