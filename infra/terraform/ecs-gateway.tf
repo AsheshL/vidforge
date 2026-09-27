@@ -63,6 +63,10 @@ resource "aws_ecs_task_definition" "api_gateway" {
         { name = "RATE_LIMIT_REDIS_URL", value = "redis://${aws_elasticache_cluster.main.cache_nodes[0].address}:6379" },
         { name = "S3_BUCKET", value = aws_s3_bucket.media.bucket },
         { name = "S3_REGION", value = var.aws_region },
+        # CloudFront distribution in front of the media bucket
+        # (cloudfront.tf) — playback.ts presigns against this instead of
+        # S3 directly whenever it's set.
+        { name = "S3_PUBLIC_ENDPOINT", value = "https://${aws_cloudfront_distribution.media.domain_name}" },
       ]
       secrets = [
         { name = "CONTEXT_SIGNING_SECRET", valueFrom = aws_secretsmanager_secret.context_signing_secret.arn },

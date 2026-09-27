@@ -68,6 +68,10 @@ resource "aws_ecs_task_definition" "video_svc_api" {
       environment = [
         { name = "S3_BUCKET", value = aws_s3_bucket.media.bucket },
         { name = "S3_REGION", value = var.aws_region },
+        # CloudFront distribution in front of the media bucket
+        # (cloudfront.tf) — shares s3-config.ts's S3_PUBLIC_ENDPOINT seam
+        # with api-gateway.
+        { name = "S3_PUBLIC_ENDPOINT", value = "https://${aws_cloudfront_distribution.media.domain_name}" },
       ]
       secrets = [
         { name = "CONTEXT_SIGNING_SECRET", valueFrom = aws_secretsmanager_secret.context_signing_secret.arn },
@@ -183,6 +187,10 @@ resource "aws_ecs_task_definition" "transcode_worker" {
       environment = [
         { name = "S3_BUCKET", value = aws_s3_bucket.media.bucket },
         { name = "S3_REGION", value = var.aws_region },
+        # CloudFront distribution in front of the media bucket
+        # (cloudfront.tf) — shares s3-config.ts's S3_PUBLIC_ENDPOINT seam
+        # with api-gateway.
+        { name = "S3_PUBLIC_ENDPOINT", value = "https://${aws_cloudfront_distribution.media.domain_name}" },
       ]
       secrets = [
         { name = "CONTEXT_SIGNING_SECRET", valueFrom = aws_secretsmanager_secret.context_signing_secret.arn },
