@@ -2,7 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Upload } from "tus-js-client";
-import { GATEWAY_URL, authHeaders, getStoredUser, getToken, type Asset } from "@/lib/api";
+import {
+  GATEWAY_URL,
+  authHeaders,
+  getStoredUser,
+  getToken,
+  type Asset,
+  type ThumbnailsResponse,
+} from "@/lib/api";
 
 const STATUS_COLORS: Record<Asset["status"], string> = {
   UPLOADING: "text-amber-400",
@@ -17,6 +24,37 @@ function formatBytes(n: number | null): string {
   if (n === null) return "—";
   if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function AssetThumbnail({ jobId }: { jobId: string }) {
+  const [poster, setPoster] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch(`${GATEWAY_URL}/v1/jobs/${jobId}/thumbnails`, {
+        headers: authHeaders(),
+      });
+      if (!res.ok || cancelled) return;
+      const body = (await res.json()) as ThumbnailsResponse;
+      if (!cancelled && body.thumbnails?.length) setPoster(body.thumbnails[0]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId]);
+
+  if (!poster) {
+    return <div className="aspect-video w-16 rounded bg-slate-800" />;
+  }
+  // eslint-disable-next-line @next/next/no-img-element
+  return (
+    <img
+      src={poster}
+      alt=""
+      className="aspect-video w-16 rounded border border-slate-800 object-cover"
+    />
+  );
 }
 
 export function AssetsBoard() {
@@ -140,6 +178,7 @@ export function AssetsBoard() {
         <table className="w-full text-sm">
           <thead className="bg-slate-900 text-left text-slate-400">
             <tr>
+              <th className="px-4 py-2.5 font-medium">Preview</th>
               <th className="px-4 py-2.5 font-medium">Title</th>
               <th className="px-4 py-2.5 font-medium">Status</th>
               <th className="px-4 py-2.5 font-medium">Size</th>
@@ -150,13 +189,20 @@ export function AssetsBoard() {
           <tbody className="divide-y divide-slate-800">
             {assets.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-slate-500">
+                <td colSpan={6} className="px-4 py-6 text-center text-slate-500">
                   No assets yet{canEdit ? " — upload a video to get started." : "."}
                 </td>
               </tr>
             )}
             {assets.map((a) => (
               <tr key={a.assetId} className="bg-slate-950">
+                <td className="px-4 py-3">
+                  {a.latestCompletedJobId ? (
+                    <AssetThumbnail jobId={a.latestCompletedJobId} />
+                  ) : (
+                    <div className="aspect-video w-16 rounded bg-slate-900" />
+                  )}
+                </td>
                 <td className="max-w-64 truncate px-4 py-3 text-slate-200">{a.title}</td>
                 <td className={`px-4 py-3 font-medium ${STATUS_COLORS[a.status]}`}>{a.status}</td>
                 <td className="px-4 py-3 text-xs text-slate-400">{formatBytes(a.sourceBytes)}</td>

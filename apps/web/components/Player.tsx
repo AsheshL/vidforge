@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Hls from "hls.js";
-import { GATEWAY_URL, getToken } from "@/lib/api";
+import { GATEWAY_URL, authHeaders, getToken, type ThumbnailsResponse } from "@/lib/api";
 
 export function Player({ jobId }: { jobId: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -11,6 +11,22 @@ export function Player({ jobId }: { jobId: string }) {
   // -1 = auto (hls.js ABR picks the rendition)
   const [level, setLevel] = useState(-1);
   const hlsRef = useRef<Hls | null>(null);
+  const [thumbnails, setThumbnails] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch(`${GATEWAY_URL}/v1/jobs/${jobId}/thumbnails`, {
+        headers: authHeaders(),
+      });
+      if (!res.ok || cancelled) return;
+      const body = (await res.json()) as ThumbnailsResponse;
+      if (!cancelled) setThumbnails(body.thumbnails ?? []);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -59,6 +75,12 @@ export function Player({ jobId }: { jobId: string }) {
     if (hlsRef.current) hlsRef.current.currentLevel = value;
   }
 
+  function seekToThumbnail(i: number) {
+    const video = videoRef.current;
+    if (!video || !video.duration || thumbnails.length === 0) return;
+    video.currentTime = (i / thumbnails.length) * video.duration;
+  }
+
   if (error) {
     return (
       <div className="flex h-64 items-center justify-center rounded-lg border border-slate-800 bg-slate-900">
@@ -93,6 +115,21 @@ export function Player({ jobId }: { jobId: string }) {
               className={`rounded px-2 py-0.5 ${level === i ? "bg-sky-600 text-white" : "bg-slate-800 hover:bg-slate-700"}`}
             >
               {label}
+            </button>
+          ))}
+        </div>
+      )}
+      {thumbnails.length > 0 && (
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          {thumbnails.map((src, i) => (
+            <button
+              key={src}
+              onClick={() => seekToThumbnail(i)}
+              className="shrink-0 overflow-hidden rounded border border-slate-800 hover:border-sky-500"
+              title={`Seek to ${i + 1} of ${thumbnails.length}`}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={src} alt="" className="aspect-video w-24 object-cover" />
             </button>
           ))}
         </div>
