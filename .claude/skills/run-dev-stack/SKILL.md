@@ -78,6 +78,12 @@ Skips the signup round trip when reusing an already-up stack — the
 port + healthz checks already cover that case, and re-hammering signup
 just burns down the shared rate limit for no new information.
 
+## End-to-end suite
+
+Once the stack is up, `pnpm e2e` (plus `docker compose up -d mailpit`) runs
+the Playwright suite in `e2e/` covering every user-facing flow, API and
+browser. See `e2e/README.md` for options and what each spec covers.
+
 ## Seeded accounts (`packages/db/prisma/seed.ts`)
 
 Password-less — sign in with `POST /v1/dev/login {"email": "..."}`
