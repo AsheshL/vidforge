@@ -70,4 +70,24 @@ export function registerPlaybackRoutes(app: FastifyInstance, videoClient: VideoS
       return reply.code(404).send({ error: "playlist not found" });
     }
   });
+
+  app.get("/v1/jobs/:jobId/thumbnails", { preHandler: requireRole("VIEWER") }, async (req, reply) => {
+    const { jobId } = req.params as { jobId: string };
+
+    // Org-scoped ownership check; also rejects jobs without output.
+    const manifest = await new Promise<{ thumbnailStorageKeys: string[] } | null>((resolve) => {
+      videoClient.getOutputManifest({ context: req.authContext!, jobId }, (err, res) =>
+        resolve(err ? null : res),
+      );
+    });
+
+    const keys = manifest?.thumbnailStorageKeys ?? [];
+    reply.header("cache-control", `private, max-age=${SIGNED_URL_TTL_SECONDS - 60}`);
+    if (keys.length === 0) {
+      return reply.send({ thumbnails: [] });
+    }
+
+    const thumbnails = await Promise.all(keys.map((key) => presign(key)));
+    return reply.send({ thumbnails });
+  });
 }
