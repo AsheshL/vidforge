@@ -60,3 +60,8 @@ output "app_url" {
   description = "Public HTTPS entrypoint for the app."
   value       = "https://${var.domain_name}"
 }
+
+output "media_cdn_domain_name" {
+  description = "CloudFront distribution in front of the media bucket — this is what S3_PUBLIC_ENDPOINT is set to on api-gateway/video-svc."
+  value       = aws_cloudfront_distribution.media.domain_name
+}
