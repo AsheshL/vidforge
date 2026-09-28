@@ -28,6 +28,7 @@ import { signContext } from "@vidforge/svc-auth";
 import { authServiceImpl } from "./service.js";
 import { hashPassword } from "./password.js";
 import { sendViewerInviteEmail } from "./mailer.js";
+import { signViewerActivationToken } from "./jwt.js";
 
 const staffCtx = signContext({ userId: "admin1", orgId: "org1", roles: ["ADMIN"], traceId: "t1" });
 
@@ -402,5 +403,83 @@ describe("revokeViewer", () => {
       data: { revokedAt: expect.any(Date) },
     });
     expect(callback).toHaveBeenCalledWith(null, { revoked: true });
+  });
+});
+
+describe("activateViewer", () => {
+  it("rejects an expired or malformed token", async () => {
+    const callback = vi.fn();
+    await authServiceImpl.activateViewer(
+      { request: { orgSlug: "acme", token: "garbage", password: "longenoughpassword" } } as never,
+      callback,
+    );
+    expect(callback).toHaveBeenCalledWith(expect.objectContaining({ code: status.UNAUTHENTICATED }));
+  });
+
+  it("rejects activating an already-activated account", async () => {
+    vi.stubEnv("JWT_SECRET", "current-secret");
+    const { token } = await signViewerActivationToken({ sub: "viewer1" });
+    vi.mocked(prisma.viewer.findUnique).mockResolvedValueOnce({
+      id: "viewer1", orgId: "org1", activatedAt: new Date(), revokedAt: null,
+    } as never);
+    vi.mocked(prisma.org.findUnique).mockResolvedValueOnce({ id: "org1", slug: "acme" } as never);
+
+    const callback = vi.fn();
+    await authServiceImpl.activateViewer(
+      { request: { orgSlug: "acme", token, password: "longenoughpassword" } } as never,
+      callback,
+    );
+    expect(callback).toHaveBeenCalledWith(expect.objectContaining({ code: status.ALREADY_EXISTS }));
+  });
+
+  it("activates a pending viewer and returns a session", async () => {
+    vi.stubEnv("JWT_SECRET", "current-secret");
+    const { token } = await signViewerActivationToken({ sub: "viewer1" });
+    vi.mocked(prisma.viewer.findUnique).mockResolvedValueOnce({
+      id: "viewer1", orgId: "org1", activatedAt: null, revokedAt: null,
+    } as never);
+    vi.mocked(prisma.org.findUnique).mockResolvedValueOnce({ id: "org1", slug: "acme" } as never);
+    vi.mocked(prisma.viewer.update).mockResolvedValueOnce({
+      id: "viewer1", orgId: "org1", email: "v@example.com", invitedAt: new Date(), activatedAt: new Date(),
+    } as never);
+
+    const callback = vi.fn();
+    await authServiceImpl.activateViewer(
+      { request: { orgSlug: "acme", token, password: "longenoughpassword" } } as never,
+      callback,
+    );
+    expect(callback).toHaveBeenCalledWith(null, expect.objectContaining({ token: expect.any(String) }));
+  });
+});
+
+describe("viewerLogin", () => {
+  it("rejects a revoked viewer even with the correct password", async () => {
+    vi.mocked(prisma.org.findUnique).mockResolvedValueOnce({ id: "org1", slug: "acme" } as never);
+    vi.mocked(prisma.viewer.findUnique).mockResolvedValueOnce({
+      id: "viewer1", orgId: "org1", passwordHash: await hashPassword("correcthorsebattery"), revokedAt: new Date(),
+    } as never);
+
+    const callback = vi.fn();
+    await authServiceImpl.viewerLogin(
+      { request: { orgSlug: "acme", email: "v@example.com", password: "correcthorsebattery" } } as never,
+      callback,
+    );
+    expect(callback).toHaveBeenCalledWith(expect.objectContaining({ code: status.UNAUTHENTICATED }));
+  });
+
+  it("logs in an activated, non-revoked viewer", async () => {
+    vi.mocked(prisma.org.findUnique).mockResolvedValueOnce({ id: "org1", slug: "acme" } as never);
+    vi.mocked(prisma.viewer.findUnique).mockResolvedValueOnce({
+      id: "viewer1", orgId: "org1", email: "v@example.com",
+      passwordHash: await hashPassword("correcthorsebattery"), revokedAt: null,
+      invitedAt: new Date(), activatedAt: new Date(),
+    } as never);
+
+    const callback = vi.fn();
+    await authServiceImpl.viewerLogin(
+      { request: { orgSlug: "acme", email: "v@example.com", password: "correcthorsebattery" } } as never,
+      callback,
+    );
+    expect(callback).toHaveBeenCalledWith(null, expect.objectContaining({ token: expect.any(String) }));
   });
 });

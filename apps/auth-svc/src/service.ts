@@ -4,7 +4,13 @@ import { Role, type AuthServiceServer, type User as ProtoUser } from "@vidforge/
 import type { RequestContext } from "@vidforge/proto/common";
 import { verifyContext } from "@vidforge/svc-auth";
 import { randomBytes, randomUUID } from "node:crypto";
-import { signToken, signViewerActivationToken, verifyJwt } from "./jwt.js";
+import {
+  signToken,
+  signViewerActivationToken,
+  signViewerToken,
+  verifyJwt,
+  verifyViewerActivationToken,
+} from "./jwt.js";
 import { hashPassword, verifyPassword } from "./password.js";
 import { sendInviteEmail, sendViewerInviteEmail } from "./mailer.js";
 
@@ -493,6 +499,57 @@ export const authServiceImpl: AuthServiceServer = {
     }
     await prisma.viewer.update({ where: { id: viewer.id }, data: { revokedAt: new Date() } });
     callback(null, { revoked: true });
+  },
+
+  activateViewer: async (call, callback) => {
+    const { orgSlug, token, password } = call.request;
+    if (password.length < 8) {
+      return callback(grpcError(status.INVALID_ARGUMENT, "password must be at least 8 characters"));
+    }
+    let claims;
+    try {
+      claims = await verifyViewerActivationToken(token);
+    } catch {
+      return callback(grpcError(status.UNAUTHENTICATED, "invalid or expired invite link"));
+    }
+    const [viewer, org] = await Promise.all([
+      prisma.viewer.findUnique({ where: { id: claims.sub } }),
+      prisma.org.findUnique({ where: { slug: orgSlug } }),
+    ]);
+    if (!viewer || !org || viewer.orgId !== org.id) {
+      return callback(grpcError(status.NOT_FOUND, "no such invite"));
+    }
+    if (viewer.revokedAt) {
+      return callback(grpcError(status.PERMISSION_DENIED, "this invite has been revoked"));
+    }
+    if (viewer.activatedAt) {
+      return callback(grpcError(status.ALREADY_EXISTS, "this account is already activated — sign in instead"));
+    }
+    const passwordHash = await hashPassword(password);
+    const activated = await prisma.viewer.update({
+      where: { id: viewer.id },
+      data: { passwordHash, activatedAt: new Date() },
+    });
+    const { token: sessionToken, expiresAt } = await signViewerToken({ sub: activated.id, org: activated.orgId });
+    callback(null, { token: sessionToken, viewer: toProtoViewer(activated), expiresAt });
+  },
+
+  viewerLogin: async (call, callback) => {
+    try {
+      const { orgSlug, email, password } = call.request;
+      const org = await prisma.org.findUnique({ where: { slug: orgSlug } });
+      if (!org) {
+        return callback(grpcError(status.UNAUTHENTICATED, "invalid email or password"));
+      }
+      const viewer = await prisma.viewer.findUnique({ where: { orgId_email: { orgId: org.id, email } } });
+      if (!viewer?.passwordHash || viewer.revokedAt || !(await verifyPassword(password, viewer.passwordHash))) {
+        return callback(grpcError(status.UNAUTHENTICATED, "invalid email or password"));
+      }
+      const { token, expiresAt } = await signViewerToken({ sub: viewer.id, org: viewer.orgId });
+      callback(null, { token, viewer: toProtoViewer(viewer), expiresAt });
+    } catch (err) {
+      callback(grpcError(status.INTERNAL, `login failed: ${(err as Error).message}`));
+    }
   },
 
   recordAuditEvent: async (call, callback) => {
