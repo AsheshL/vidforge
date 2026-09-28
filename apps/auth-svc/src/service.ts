@@ -35,6 +35,10 @@ function grpcError(code: status, message: string): ServiceError {
   return Object.assign(new Error(message), { code, details: message }) as ServiceError;
 }
 
+function slugify(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-+|-+$)/g, "") || "org";
+}
+
 // VerifyToken/IssueDevToken are entry points and take no context; everything
 // else requires a gateway-signed context.
 function authenticate(ctx: RequestContext | undefined): RequestContext | ServiceError {
@@ -148,9 +152,15 @@ export const authServiceImpl: AuthServiceServer = {
       // Each signup gets its own org: org scoping then isolates their assets
       // and jobs, and as OWNER they can manage everything inside it.
       const user = await prisma.$transaction(async (tx) => {
-        const org = await tx.org.create({
-          data: { name: call.request.orgName.trim() || `${displayName.trim()}'s org` },
-        });
+        const orgName = call.request.orgName.trim() || `${displayName.trim()}'s org`;
+        const base = slugify(orgName);
+        let slug = base;
+        let suffix = 0;
+        while (await prisma.org.findUnique({ where: { slug } })) {
+          suffix += 1;
+          slug = `${base}-${suffix}`;
+        }
+        const org = await tx.org.create({ data: { name: orgName, slug } });
         return tx.user.create({
           data: { email, displayName: displayName.trim(), passwordHash, orgId: org.id, role: "OWNER" },
         });
