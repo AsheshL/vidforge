@@ -68,6 +68,11 @@ resource "aws_ecs_task_definition" "api_gateway" {
         { name = "AUTH_SVC_ADDR", value = "auth.vidforge.local:50053" },
         { name = "VIDEO_SVC_ADDR", value = "video.vidforge.local:50051" },
         { name = "WEB_ORIGIN", value = "https://${var.domain_name}" },
+        # The viewer portal's own subdomain — must be in the gateway's CORS
+        # allow-list (main.ts) alongside WEB_ORIGIN, or every /v1/portal/*
+        # preflight from the viewer app is blocked. Same subdomain as
+        # ecs-auth.tf's VIEWER_ORIGIN, which builds the matching invite links.
+        { name = "VIEWER_ORIGIN", value = "https://viewer.${var.domain_name}" },
         { name = "TRUST_PROXY", value = "true" },
         { name = "RATE_LIMIT_REDIS_URL", value = "redis://${aws_elasticache_cluster.main.cache_nodes[0].address}:6379" },
         { name = "S3_BUCKET", value = aws_s3_bucket.media.bucket },

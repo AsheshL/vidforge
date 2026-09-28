@@ -11,7 +11,7 @@ import rateLimit from "@fastify/rate-limit";
 import { credentials } from "@grpc/grpc-js";
 import { VideoServiceClient } from "@vidforge/proto/video";
 import { authClient } from "./auth.js";
-import { createRateLimitRedis, parseTrustProxy } from "./config.js";
+import { createRateLimitRedis, parseAllowedOrigins, parseTrustProxy } from "./config.js";
 import { registerTranscodeRoutes } from "./routes/transcode.js";
 import { registerPlaybackRoutes } from "./routes/playback.js";
 import { registerAccountRoutes } from "./routes/account.js";
@@ -28,7 +28,13 @@ import { registerViewerRoutes } from "./routes/viewers.js";
 const app = Fastify({ logger: true, trustProxy: parseTrustProxy(process.env.TRUST_PROXY) });
 
 await app.register(cors, {
-  origin: process.env.WEB_ORIGIN ?? "http://localhost:3000",
+  // The web app (WEB_ORIGIN) and the viewer portal (VIEWER_ORIGIN) are
+  // separate deployables on separate origins — both must be allowed, not
+  // just one, or the viewer app's /v1/portal/* preflights are blocked.
+  origin: parseAllowedOrigins(
+    process.env.WEB_ORIGIN ?? "http://localhost:3000",
+    process.env.VIEWER_ORIGIN ?? "http://localhost:3001",
+  ),
   // PATCH and the exposed headers are required by the tus upload protocol.
   methods: ["GET", "HEAD", "POST", "DELETE", "PATCH"],
   exposedHeaders: ["Location", "Upload-Offset", "Upload-Length", "Tus-Resumable"],

@@ -18,6 +18,20 @@ export function parseTrustProxy(raw: string | undefined): boolean | number | str
 }
 
 /**
+ * CORS allow-list, built from one or more env vars that may each hold a
+ * comma-separated list of origins (e.g. WEB_ORIGIN, VIEWER_ORIGIN). The web
+ * app and the viewer portal are separate deployables on separate origins, so
+ * a single-origin `origin` string (which @fastify/cors reflects verbatim)
+ * would silently block every /v1/portal/* preflight from the viewer app.
+ */
+export function parseAllowedOrigins(...vars: (string | undefined)[]): string[] {
+  return vars
+    .flatMap((v) => (v ?? "").split(","))
+    .map((o) => o.trim())
+    .filter(Boolean);
+}
+
+/**
  * Redis connection backing the rate limiter, so the limits are a fleet-wide
  * budget rather than per-replica (N gateway tasks with the default in-process
  * store means N x the configured limit).
