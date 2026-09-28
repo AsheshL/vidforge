@@ -190,36 +190,41 @@ export const authServiceImpl: AuthServiceServer = {
       const passwordHash = await hashPassword(password);
       // Each signup gets its own org: org scoping then isolates their assets
       // and jobs, and as OWNER they can manage everything inside it.
-      const user = await prisma.$transaction(async (tx) => {
-        const orgName = call.request.orgName.trim() || `${displayName.trim()}'s org`;
-        const base = slugify(orgName);
-        let slug = base;
-        let suffix = 0;
-        // tx, not prisma: the collision check has to see the transaction's
-        // own writes and run on the same pooled connection as the create
-        // below, or it holds one connection while requesting a second —
-        // a deadlock/pool-exhaustion risk under concurrent signups.
-        while (await tx.org.findUnique({ where: { slug } })) {
-          suffix += 1;
-          slug = `${base}-${suffix}`;
-        }
-        let org;
-        try {
-          org = await tx.org.create({ data: { name: orgName, slug } });
-        } catch (err) {
-          // Two identical org names can race between the findUnique check
-          // above and this create; Prisma reports that as a P2002
-          // unique-constraint violation, not a crash. One retry with a
-          // random suffix is enough — a second collision at that point is
-          // astronomically unlikely and safe to surface as a real error.
-          if ((err as { code?: string }).code !== "P2002") throw err;
-          slug = `${base}-${randomBytes(3).toString("hex")}`;
-          org = await tx.org.create({ data: { name: orgName, slug } });
-        }
-        return tx.user.create({
-          data: { email, displayName: displayName.trim(), passwordHash, orgId: org.id, role: "OWNER" },
+      const orgName = call.request.orgName.trim() || `${displayName.trim()}'s org`;
+      const base = slugify(orgName);
+      const attemptSignup = (candidateBase: string) =>
+        prisma.$transaction(async (tx) => {
+          let slug = candidateBase;
+          let suffix = 0;
+          // tx, not prisma: the collision check has to see the transaction's
+          // own writes and run on the same pooled connection as the create
+          // below, or it holds one connection while requesting a second —
+          // a deadlock/pool-exhaustion risk under concurrent signups.
+          while (await tx.org.findUnique({ where: { slug } })) {
+            suffix += 1;
+            slug = `${candidateBase}-${suffix}`;
+          }
+          const org = await tx.org.create({ data: { name: orgName, slug } });
+          return tx.user.create({
+            data: { email, displayName: displayName.trim(), passwordHash, orgId: org.id, role: "OWNER" },
+          });
         });
-      });
+      let user;
+      try {
+        user = await attemptSignup(base);
+      } catch (err) {
+        // Two identical org names can race between the findUnique check and
+        // the create inside a single transaction; Prisma reports that as a
+        // P2002 unique-constraint violation. Postgres aborts the whole
+        // transaction on any statement error (and Prisma's interactive
+        // transactions don't auto-savepoint), so the retry can't be another
+        // statement inside the now-aborted transaction — it has to be a
+        // brand-new transaction. One retry with a random suffix is enough: a
+        // second collision at that point is astronomically unlikely and
+        // safe to surface as a real error.
+        if ((err as { code?: string }).code !== "P2002") throw err;
+        user = await attemptSignup(`${base}-${randomBytes(3).toString("hex")}`);
+      }
       await prisma.auditEvent.create({
         data: {
           orgId: user.orgId,
@@ -619,17 +624,21 @@ export const authServiceImpl: AuthServiceServer = {
   recordAuditEvent: async (call, callback) => {
     const ctx = authenticate(call.request.context);
     if (ctx instanceof Error) return callback(ctx);
-    const event = await prisma.auditEvent.create({
-      data: {
-        orgId: ctx.orgId,
-        actorUserId: ctx.userId,
-        action: call.request.action,
-        resourceType: call.request.resourceType,
-        resourceId: call.request.resourceId,
-        detailJson: call.request.detailJson ? JSON.parse(call.request.detailJson) : undefined,
-      },
-    });
-    callback(null, { eventId: event.id });
+    try {
+      const event = await prisma.auditEvent.create({
+        data: {
+          orgId: ctx.orgId,
+          actorUserId: ctx.userId,
+          action: call.request.action,
+          resourceType: call.request.resourceType,
+          resourceId: call.request.resourceId,
+          detailJson: call.request.detailJson ? JSON.parse(call.request.detailJson) : undefined,
+        },
+      });
+      callback(null, { eventId: event.id });
+    } catch (err) {
+      callback(grpcError(status.INTERNAL, `failed to record audit event: ${(err as Error).message}`));
+    }
   },
 
   listAuditEvents: async (call, callback) => {

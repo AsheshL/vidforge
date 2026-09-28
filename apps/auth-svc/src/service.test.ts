@@ -90,22 +90,35 @@ describe("signUp org slug", () => {
     expect(callback).toHaveBeenCalledWith(null, expect.objectContaining({ token: expect.any(String) }));
   });
 
-  it("retries once with a random suffix when two signups race to create the same slug", async () => {
+  it("retries once, in a brand-new transaction, when two signups race to create the same slug", async () => {
+    // Postgres aborts the whole transaction on a P2002 from tx.org.create —
+    // a retry inside the SAME transaction would itself fail (25P02:
+    // "current transaction is aborted"), so the retry has to be a second,
+    // independent call to prisma.$transaction. Mocking two separate
+    // mockImplementationOnce calls (rather than one create() mock that
+    // rejects-then-resolves inside a single transaction) is what makes this
+    // test able to catch that class of bug.
     vi.mocked(prisma.user.findUnique).mockResolvedValueOnce(null);
-    const create = vi
+    const firstCreate = vi
       .fn()
-      .mockRejectedValueOnce(Object.assign(new Error("Unique constraint failed"), { code: "P2002" }))
-      .mockResolvedValueOnce({ id: "org1", slug: "acme-inc-abc123" });
-    vi.mocked(prisma.$transaction).mockImplementationOnce(async (fn) =>
-      fn({
-        org: { findUnique: vi.fn().mockResolvedValue(null), create },
-        user: {
-          create: vi.fn().mockResolvedValue({
-            id: "u1", email: "a@b.com", displayName: "A", orgId: "org1", role: "OWNER",
-          }),
-        },
-      } as never),
-    );
+      .mockRejectedValueOnce(Object.assign(new Error("Unique constraint failed"), { code: "P2002" }));
+    const secondCreate = vi.fn().mockResolvedValueOnce({ id: "org1", slug: "acme-inc-abc123" });
+    const userCreate = vi.fn().mockResolvedValue({
+      id: "u1", email: "a@b.com", displayName: "A", orgId: "org1", role: "OWNER",
+    });
+    vi.mocked(prisma.$transaction)
+      .mockImplementationOnce(async (fn) =>
+        fn({
+          org: { findUnique: vi.fn().mockResolvedValue(null), create: firstCreate },
+          user: { create: userCreate },
+        } as never),
+      )
+      .mockImplementationOnce(async (fn) =>
+        fn({
+          org: { findUnique: vi.fn().mockResolvedValue(null), create: secondCreate },
+          user: { create: userCreate },
+        } as never),
+      );
 
     const callback = vi.fn();
     const call = {
@@ -114,8 +127,25 @@ describe("signUp org slug", () => {
 
     await authServiceImpl.signUp(call, callback);
 
-    expect(create).toHaveBeenCalledTimes(2);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(firstCreate).toHaveBeenCalledTimes(1);
+    expect(secondCreate).toHaveBeenCalledTimes(1);
     expect(callback).toHaveBeenCalledWith(null, expect.objectContaining({ token: expect.any(String) }));
+  });
+
+  it("does not retry, and returns an INTERNAL error, on a non-P2002 failure", async () => {
+    vi.mocked(prisma.user.findUnique).mockResolvedValueOnce(null);
+    vi.mocked(prisma.$transaction).mockRejectedValueOnce(new Error("connection reset"));
+
+    const callback = vi.fn();
+    const call = {
+      request: { email: "a@b.com", password: "smoketestpassword123", displayName: "A", orgName: "Acme, Inc!" },
+    } as Parameters<typeof authServiceImpl.signUp>[0];
+
+    await authServiceImpl.signUp(call, callback);
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(callback).toHaveBeenCalledWith(expect.objectContaining({ code: status.INTERNAL }));
   });
 });
 
