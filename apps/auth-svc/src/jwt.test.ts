@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { signToken, verifyJwt } from "./jwt.js";
+import { signToken, signViewerActivationToken, signViewerToken, verifyJwt, verifyViewerActivationToken } from "./jwt.js";
 
 const claims = { sub: "u1", org: "org1", role: "EDITOR" };
 
@@ -55,5 +55,35 @@ describe("signToken / verifyJwt", () => {
 
       await expect(verifyJwt(token)).rejects.toBeDefined();
     });
+  });
+});
+
+describe("viewer session tokens", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("round-trips with kind: viewer, distinguishing it from a staff token", async () => {
+    vi.stubEnv("JWT_SECRET", "current-secret");
+    const { token } = await signViewerToken({ sub: "viewer1", org: "org1" });
+    await expect(verifyJwt(token)).resolves.toMatchObject({ sub: "viewer1", org: "org1", kind: "viewer" });
+  });
+});
+
+describe("viewer activation tokens", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("round-trips and exposes the viewer id as sub", async () => {
+    vi.stubEnv("JWT_SECRET", "current-secret");
+    const { token } = await signViewerActivationToken({ sub: "viewer1" });
+    await expect(verifyViewerActivationToken(token)).resolves.toMatchObject({ sub: "viewer1" });
+  });
+
+  it("rejects a viewer session token presented as an activation token", async () => {
+    vi.stubEnv("JWT_SECRET", "current-secret");
+    const { token } = await signViewerToken({ sub: "viewer1", org: "org1" });
+    await expect(verifyViewerActivationToken(token)).rejects.toThrow();
   });
 });

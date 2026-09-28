@@ -52,6 +52,9 @@ resource "aws_ecs_task_definition" "auth_svc" {
       environment = [
         { name = "MAIL_FROM", value = "VidForge <no-reply@${var.domain_name}>" },
         { name = "WEB_ORIGIN", value = "https://${var.domain_name}" },
+        # The viewer portal's own subdomain — used to build viewer invite
+        # activation links, which must not point at the staff app.
+        { name = "VIEWER_ORIGIN", value = "https://viewer.${var.domain_name}" },
         # ADOT sidecar, same task — see the container definition below.
         { name = "OTEL_EXPORTER_OTLP_ENDPOINT", value = "http://localhost:4318" },
       ]

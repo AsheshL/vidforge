@@ -7,7 +7,7 @@ vi.mock("@vidforge/db", async (importOriginal) => {
     ...actual,
     prisma: {
       ...actual.prisma,
-      asset: { findMany: vi.fn(), count: vi.fn() },
+      asset: { findMany: vi.fn(), count: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
     },
   };
 });
@@ -18,9 +18,13 @@ vi.mock("../auth.js", () => ({
   requireRole: () => async (req: { authContext?: unknown }) => {
     req.authContext = { orgId: "org-1", userId: "user-1", roles: ["VIEWER"] };
   },
+  authClient: {
+    recordAuditEvent: vi.fn((_req, cb: any) => cb(null, { eventId: "event-1" })),
+  },
 }));
 
 import { prisma } from "@vidforge/db";
+import { authClient } from "../auth.js";
 import { registerAssetRoutes } from "./assets.js";
 
 function buildApp() {
@@ -41,6 +45,7 @@ function makeAsset(id: string): Awaited<ReturnType<typeof prisma.asset.findMany>
     durationSeconds: 12,
     createdBy: "user-1",
     createdAt: new Date("2026-01-01T00:00:00Z"),
+    publishedAt: null,
     jobs: [],
   } as unknown as Awaited<ReturnType<typeof prisma.asset.findMany>>[number];
 }
@@ -131,8 +136,62 @@ describe("GET /v1/assets", () => {
         durationSeconds: 12,
         createdBy: "user-1",
         createdAt: "2026-01-01T00:00:00.000Z",
+        publishedAt: null,
         latestCompletedJobId: null,
       },
     ]);
+  });
+
+  it("includes publishedAt so the staff UI can reflect current publish state", async () => {
+    vi.mocked(prisma.asset.findMany).mockResolvedValueOnce([
+      { ...makeAsset("a1"), publishedAt: new Date("2026-02-01T00:00:00Z") },
+    ]);
+    vi.mocked(prisma.asset.count).mockResolvedValueOnce(1);
+    const app = buildApp();
+
+    const res = await app.inject({ method: "GET", url: "/v1/assets" });
+
+    expect(res.json().assets[0].publishedAt).toBe("2026-02-01T00:00:00.000Z");
+  });
+});
+
+describe("PATCH /v1/assets/:id/publish", () => {
+  it("404s for an asset in a different org", async () => {
+    vi.mocked(prisma.asset.findFirst).mockResolvedValueOnce(null);
+    const app = buildApp();
+    const res = await app.inject({
+      method: "PATCH", url: "/v1/assets/a1/publish", payload: { published: true },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("sets publishedAt when publishing", async () => {
+    vi.mocked(prisma.asset.findFirst).mockResolvedValueOnce({ id: "a1", orgId: "org-1" } as never);
+    vi.mocked(prisma.asset.update).mockResolvedValueOnce({ id: "a1", publishedAt: new Date("2026-09-28") } as never);
+    const app = buildApp();
+    const res = await app.inject({
+      method: "PATCH", url: "/v1/assets/a1/publish", payload: { published: true },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(prisma.asset.update).toHaveBeenCalledWith({ where: { id: "a1" }, data: { publishedAt: expect.any(Date) } });
+  });
+
+  it("clears publishedAt when unpublishing", async () => {
+    vi.mocked(prisma.asset.findFirst).mockResolvedValueOnce({ id: "a1", orgId: "org-1" } as never);
+    vi.mocked(prisma.asset.update).mockResolvedValueOnce({ id: "a1", publishedAt: null } as never);
+    const app = buildApp();
+    await app.inject({ method: "PATCH", url: "/v1/assets/a1/publish", payload: { published: false } });
+    expect(prisma.asset.update).toHaveBeenCalledWith({ where: { id: "a1" }, data: { publishedAt: null } });
+  });
+
+  it("records an audit event — publishing an asset is the most consequential action in the feature", async () => {
+    vi.mocked(prisma.asset.findFirst).mockResolvedValueOnce({ id: "a1", orgId: "org-1" } as never);
+    vi.mocked(prisma.asset.update).mockResolvedValueOnce({ id: "a1", publishedAt: new Date("2026-09-28") } as never);
+    const app = buildApp();
+    await app.inject({ method: "PATCH", url: "/v1/assets/a1/publish", payload: { published: true } });
+    expect(authClient.recordAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "asset.publish", resourceType: "asset", resourceId: "a1" }),
+      expect.any(Function),
+    );
   });
 });

@@ -135,6 +135,9 @@ services:
       VIDEO_SVC_ADDR: video-svc:50051
       JOBS_SVC_ADDR: jobs-svc:50054
       WEB_ORIGIN: http://localhost:3100
+      # Distinct port from WEB_ORIGIN (3100) and the dev-compose viewer
+      # (3001) so this stack's viewer portal has its own CORS-allowed origin.
+      VIEWER_ORIGIN: http://localhost:3101
       # TRUST_PROXY stays unset: here the gateway is published straight to
       # the host, so honouring X-Forwarded-For would let any caller spoof
       # their IP past the auth rate limits. Set it to "true" on AWS, where

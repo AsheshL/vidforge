@@ -4,12 +4,19 @@ import { Role, type AuthServiceServer, type User as ProtoUser } from "@vidforge/
 import type { RequestContext } from "@vidforge/proto/common";
 import { verifyContext } from "@vidforge/svc-auth";
 import { randomBytes, randomUUID } from "node:crypto";
-import { signToken, verifyJwt } from "./jwt.js";
+import {
+  signToken,
+  signViewerActivationToken,
+  signViewerToken,
+  verifyJwt,
+  verifyViewerActivationToken,
+} from "./jwt.js";
 import { hashPassword, verifyPassword } from "./password.js";
-import { sendInviteEmail } from "./mailer.js";
+import { sendInviteEmail, sendViewerInviteEmail } from "./mailer.js";
 
 const TEMP_PASSWORD_TTL_HOURS = Number(process.env.TEMP_PASSWORD_TTL_HOURS ?? 24);
 const WEB_URL = process.env.WEB_ORIGIN ?? "http://localhost:3000";
+const VIEWER_URL = process.env.VIEWER_ORIGIN ?? "http://localhost:3001";
 
 const ROLE_RANK: Record<string, number> = { VIEWER: 1, EDITOR: 2, ADMIN: 3, OWNER: 4 };
 
@@ -33,6 +40,10 @@ function apiKeyIdFromToken(token: string): string | null {
 
 function grpcError(code: status, message: string): ServiceError {
   return Object.assign(new Error(message), { code, details: message }) as ServiceError;
+}
+
+function slugify(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-+|-+$)/g, "") || "org";
 }
 
 // VerifyToken/IssueDevToken are entry points and take no context; everything
@@ -68,6 +79,24 @@ function toProtoUser(u: {
   };
 }
 
+function toProtoViewer(v: {
+  id: string;
+  orgId: string;
+  email: string;
+  invitedAt: Date;
+  activatedAt: Date | null;
+  revokedAt?: Date | null;
+}) {
+  return {
+    viewerId: v.id,
+    orgId: v.orgId,
+    email: v.email,
+    invitedAt: v.invitedAt,
+    activatedAt: v.activatedAt ?? undefined,
+    revokedAt: v.revokedAt ?? undefined,
+  };
+}
+
 export const authServiceImpl: AuthServiceServer = {
   verifyToken: async (call, callback) => {
     const token = call.request.token;
@@ -82,7 +111,7 @@ export const authServiceImpl: AuthServiceServer = {
           (key.expiresAt && key.expiresAt < now) ||
           !(await verifyPassword(token, key.secretHash))
         ) {
-          return callback(null, { valid: false, context: undefined, expiresAt: undefined });
+          return callback(null, { valid: false, context: undefined, viewerContext: undefined, expiresAt: undefined });
         }
         callback(null, {
           valid: true,
@@ -97,22 +126,35 @@ export const authServiceImpl: AuthServiceServer = {
             issuedAtMs: 0,
             signature: "",
           },
+          viewerContext: undefined,
           expiresAt: key.expiresAt ?? undefined,
         });
       } catch {
-        callback(null, { valid: false, context: undefined, expiresAt: undefined });
+        callback(null, { valid: false, context: undefined, viewerContext: undefined, expiresAt: undefined });
       }
       return;
     }
     try {
       const claims = await verifyJwt(call.request.token);
+      if (claims.kind === "viewer") {
+        const viewer = await prisma.viewer.findUnique({ where: { id: claims.sub } });
+        if (!viewer || !viewer.activatedAt || viewer.revokedAt) {
+          return callback(null, { valid: false, context: undefined, viewerContext: undefined, expiresAt: undefined });
+        }
+        return callback(null, {
+          valid: true,
+          context: undefined,
+          viewerContext: { viewerId: viewer.id, orgId: viewer.orgId },
+          expiresAt: new Date(claims.exp * 1000),
+        });
+      }
       // Role and org come fresh from the DB, not the token, so role
       // changes and deleted users take effect within a token's lifetime.
       const user = await prisma.user.findUnique({ where: { id: claims.sub } });
       // A user on a temporary password has no business holding a session:
       // any token from before the invite (or a leak) is rejected here.
       if (!user || user.mustChangePassword) {
-        return callback(null, { valid: false, context: undefined, expiresAt: undefined });
+        return callback(null, { valid: false, context: undefined, viewerContext: undefined, expiresAt: undefined });
       }
       callback(null, {
         valid: true,
@@ -125,10 +167,11 @@ export const authServiceImpl: AuthServiceServer = {
           issuedAtMs: 0,
           signature: "",
         },
+        viewerContext: undefined,
         expiresAt: new Date(claims.exp * 1000),
       });
     } catch {
-      callback(null, { valid: false, context: undefined, expiresAt: undefined });
+      callback(null, { valid: false, context: undefined, viewerContext: undefined, expiresAt: undefined });
     }
   },
 
@@ -147,14 +190,41 @@ export const authServiceImpl: AuthServiceServer = {
       const passwordHash = await hashPassword(password);
       // Each signup gets its own org: org scoping then isolates their assets
       // and jobs, and as OWNER they can manage everything inside it.
-      const user = await prisma.$transaction(async (tx) => {
-        const org = await tx.org.create({
-          data: { name: call.request.orgName.trim() || `${displayName.trim()}'s org` },
+      const orgName = call.request.orgName.trim() || `${displayName.trim()}'s org`;
+      const base = slugify(orgName);
+      const attemptSignup = (candidateBase: string) =>
+        prisma.$transaction(async (tx) => {
+          let slug = candidateBase;
+          let suffix = 0;
+          // tx, not prisma: the collision check has to see the transaction's
+          // own writes and run on the same pooled connection as the create
+          // below, or it holds one connection while requesting a second —
+          // a deadlock/pool-exhaustion risk under concurrent signups.
+          while (await tx.org.findUnique({ where: { slug } })) {
+            suffix += 1;
+            slug = `${candidateBase}-${suffix}`;
+          }
+          const org = await tx.org.create({ data: { name: orgName, slug } });
+          return tx.user.create({
+            data: { email, displayName: displayName.trim(), passwordHash, orgId: org.id, role: "OWNER" },
+          });
         });
-        return tx.user.create({
-          data: { email, displayName: displayName.trim(), passwordHash, orgId: org.id, role: "OWNER" },
-        });
-      });
+      let user;
+      try {
+        user = await attemptSignup(base);
+      } catch (err) {
+        // Two identical org names can race between the findUnique check and
+        // the create inside a single transaction; Prisma reports that as a
+        // P2002 unique-constraint violation. Postgres aborts the whole
+        // transaction on any statement error (and Prisma's interactive
+        // transactions don't auto-savepoint), so the retry can't be another
+        // statement inside the now-aborted transaction — it has to be a
+        // brand-new transaction. One retry with a random suffix is enough: a
+        // second collision at that point is astronomically unlikely and
+        // safe to surface as a real error.
+        if ((err as { code?: string }).code !== "P2002") throw err;
+        user = await attemptSignup(`${base}-${randomBytes(3).toString("hex")}`);
+      }
       await prisma.auditEvent.create({
         data: {
           orgId: user.orgId,
@@ -385,20 +455,190 @@ export const authServiceImpl: AuthServiceServer = {
     callback(null, toProtoUser(updated));
   },
 
+  inviteViewer: async (call, callback) => {
+    try {
+      const ctx = authenticate(call.request.context);
+      if (ctx instanceof Error) return callback(ctx);
+      const inviterRank = Math.max(...ctx.roles.map((r) => ROLE_RANK[r] ?? 0), 0);
+      if (inviterRank < ROLE_RANK.ADMIN) {
+        return callback(grpcError(status.PERMISSION_DENIED, "only admins can invite viewers"));
+      }
+      const { email } = call.request;
+      if (!email.includes("@")) {
+        return callback(grpcError(status.INVALID_ARGUMENT, "valid email required"));
+      }
+
+      const existing = await prisma.viewer.findUnique({ where: { orgId_email: { orgId: ctx.orgId, email } } });
+      // Activated and not revoked: a real, live account — reject. Activated
+      // but revoked: revocation must be reversible, so fall through to the
+      // same re-invite branch below, which clears revokedAt and reinstates them.
+      if (existing?.activatedAt && !existing.revokedAt) {
+        return callback(grpcError(status.ALREADY_EXISTS, "this viewer has already activated their account"));
+      }
+      const viewer = existing
+        ? await prisma.viewer.update({ where: { id: existing.id }, data: { invitedAt: new Date(), revokedAt: null } })
+        : await prisma.viewer.create({ data: { orgId: ctx.orgId, email } });
+
+      const { token, expiresAt } = await signViewerActivationToken({ sub: viewer.id });
+      const [org, inviter] = await Promise.all([
+        prisma.org.findUnique({ where: { id: ctx.orgId } }),
+        prisma.user.findUnique({ where: { id: ctx.userId } }),
+      ]);
+      try {
+        await sendViewerInviteEmail({
+          to: email,
+          orgName: org?.displayName || org?.name || "your library",
+          inviterName: inviter?.displayName ?? "An admin",
+          activationUrl: `${VIEWER_URL}/${org?.slug ?? ""}/activate/${token}`,
+          expiresAt,
+        });
+      } catch (err) {
+        return callback(grpcError(status.INTERNAL, `failed to send invite email: ${(err as Error).message}`));
+      }
+      await prisma.auditEvent.create({
+        data: {
+          orgId: ctx.orgId, actorUserId: ctx.userId, action: existing ? "viewer.reinvite" : "viewer.invite",
+          resourceType: "viewer", resourceId: viewer.id,
+        },
+      });
+      callback(null, toProtoViewer(viewer));
+    } catch (err) {
+      // Same reasoning as signUp/login/viewerLogin's try/catch: an uncaught
+      // rejection here crashes the whole process, not just this request —
+      // and this handler sits behind the public activation flow's sibling
+      // routes, so a DB blip here is not this one caller's problem alone.
+      callback(grpcError(status.INTERNAL, `invite viewer failed: ${(err as Error).message}`));
+    }
+  },
+
+  listViewers: async (call, callback) => {
+    try {
+      const ctx = authenticate(call.request.context);
+      if (ctx instanceof Error) return callback(ctx);
+      const pageSize = Math.min(Math.max(call.request.page?.pageSize || 50, 1), 100);
+      const pageToken = call.request.page?.pageToken || undefined;
+      const [viewers, totalCount] = await Promise.all([
+        prisma.viewer.findMany({
+          where: { orgId: ctx.orgId },
+          orderBy: [{ invitedAt: "desc" }, { id: "desc" }],
+          take: pageSize,
+          ...(pageToken ? { cursor: { id: pageToken }, skip: 1 } : {}),
+        }),
+        prisma.viewer.count({ where: { orgId: ctx.orgId } }),
+      ]);
+      callback(null, {
+        viewers: viewers.map(toProtoViewer),
+        pageInfo: {
+          nextPageToken: viewers.length === pageSize ? viewers[viewers.length - 1].id : "",
+          totalCount,
+        },
+      });
+    } catch (err) {
+      callback(grpcError(status.INTERNAL, `list viewers failed: ${(err as Error).message}`));
+    }
+  },
+
+  revokeViewer: async (call, callback) => {
+    try {
+      const ctx = authenticate(call.request.context);
+      if (ctx instanceof Error) return callback(ctx);
+      const inviterRank = Math.max(...ctx.roles.map((r) => ROLE_RANK[r] ?? 0), 0);
+      if (inviterRank < ROLE_RANK.ADMIN) {
+        return callback(grpcError(status.PERMISSION_DENIED, "only admins can revoke viewers"));
+      }
+      const viewer = await prisma.viewer.findUnique({ where: { id: call.request.viewerId } });
+      if (!viewer || viewer.orgId !== ctx.orgId) {
+        return callback(grpcError(status.NOT_FOUND, "no such viewer"));
+      }
+      await prisma.viewer.update({ where: { id: viewer.id }, data: { revokedAt: new Date() } });
+      await prisma.auditEvent.create({
+        data: {
+          orgId: ctx.orgId, actorUserId: ctx.userId, action: "viewer.revoke",
+          resourceType: "viewer", resourceId: viewer.id,
+        },
+      });
+      callback(null, { revoked: true });
+    } catch (err) {
+      callback(grpcError(status.INTERNAL, `revoke viewer failed: ${(err as Error).message}`));
+    }
+  },
+
+  activateViewer: async (call, callback) => {
+    try {
+      const { orgSlug, token, password } = call.request;
+      if (password.length < 8) {
+        return callback(grpcError(status.INVALID_ARGUMENT, "password must be at least 8 characters"));
+      }
+      let claims;
+      try {
+        claims = await verifyViewerActivationToken(token);
+      } catch {
+        return callback(grpcError(status.UNAUTHENTICATED, "invalid or expired invite link"));
+      }
+      const [viewer, org] = await Promise.all([
+        prisma.viewer.findUnique({ where: { id: claims.sub } }),
+        prisma.org.findUnique({ where: { slug: orgSlug } }),
+      ]);
+      if (!viewer || !org || viewer.orgId !== org.id) {
+        return callback(grpcError(status.NOT_FOUND, "no such invite"));
+      }
+      if (viewer.revokedAt) {
+        return callback(grpcError(status.PERMISSION_DENIED, "this invite has been revoked"));
+      }
+      if (viewer.activatedAt) {
+        return callback(grpcError(status.ALREADY_EXISTS, "this account is already activated — sign in instead"));
+      }
+      const passwordHash = await hashPassword(password);
+      const activated = await prisma.viewer.update({
+        where: { id: viewer.id },
+        data: { passwordHash, activatedAt: new Date() },
+      });
+      const { token: sessionToken, expiresAt } = await signViewerToken({ sub: activated.id, org: activated.orgId });
+      callback(null, { token: sessionToken, viewer: toProtoViewer(activated), expiresAt });
+    } catch (err) {
+      // This sits behind the public POST /v1/portal/auth/activate route —
+      // an uncaught rejection here (e.g. a DB blip) would take down
+      // auth-svc for every org, not just fail this one activation.
+      callback(grpcError(status.INTERNAL, `activate viewer failed: ${(err as Error).message}`));
+    }
+  },
+
+  viewerLogin: async (call, callback) => {
+    try {
+      const { orgSlug, email, password } = call.request;
+      const org = await prisma.org.findUnique({ where: { slug: orgSlug } });
+      if (!org) {
+        return callback(grpcError(status.UNAUTHENTICATED, "invalid email or password"));
+      }
+      const viewer = await prisma.viewer.findUnique({ where: { orgId_email: { orgId: org.id, email } } });
+      if (!viewer?.passwordHash || viewer.revokedAt || !(await verifyPassword(password, viewer.passwordHash))) {
+        return callback(grpcError(status.UNAUTHENTICATED, "invalid email or password"));
+      }
+      const { token, expiresAt } = await signViewerToken({ sub: viewer.id, org: viewer.orgId });
+      callback(null, { token, viewer: toProtoViewer(viewer), expiresAt });
+    } catch (err) {
+      callback(grpcError(status.INTERNAL, `login failed: ${(err as Error).message}`));
+    }
+  },
+
   recordAuditEvent: async (call, callback) => {
     const ctx = authenticate(call.request.context);
     if (ctx instanceof Error) return callback(ctx);
-    const event = await prisma.auditEvent.create({
-      data: {
-        orgId: ctx.orgId,
-        actorUserId: ctx.userId,
-        action: call.request.action,
-        resourceType: call.request.resourceType,
-        resourceId: call.request.resourceId,
-        detailJson: call.request.detailJson ? JSON.parse(call.request.detailJson) : undefined,
-      },
-    });
-    callback(null, { eventId: event.id });
+    try {
+      const event = await prisma.auditEvent.create({
+        data: {
+          orgId: ctx.orgId,
+          actorUserId: ctx.userId,
+          action: call.request.action,
+          resourceType: call.request.resourceType,
+          resourceId: call.request.resourceId,
+          detailJson: call.request.detailJson ? JSON.parse(call.request.detailJson) : undefined,
+        },
+      });
+      callback(null, { eventId: event.id });
+    } catch (err) {
+      callback(grpcError(status.INTERNAL, `failed to record audit event: ${(err as Error).message}`));
+    }
   },
 
   listAuditEvents: async (call, callback) => {
