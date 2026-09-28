@@ -38,6 +38,7 @@ vi.mock("./playback.js", () => ({
 
 import { prisma } from "@vidforge/db";
 import { authClient } from "../auth.js";
+import { fetchHlsPlaylist, fetchThumbnailUrls } from "./playback.js";
 import { registerPortalRoutes } from "./portal.js";
 
 function buildApp() {
@@ -117,6 +118,57 @@ describe("GET /v1/portal/jobs/:jobId/hls/*", () => {
     const app = buildApp();
     const res = await app.inject({ method: "GET", url: "/v1/portal/jobs/job1/hls/master.m3u8" });
     expect(res.statusCode).toBe(404);
+  });
+
+  it("scopes requirePublishedJob's lookup to the viewer's own org and published assets only", async () => {
+    vi.mocked(prisma.transcodeJob.findFirst).mockResolvedValueOnce(null);
+    const app = buildApp();
+    await app.inject({ method: "GET", url: "/v1/portal/jobs/job1/hls/master.m3u8" });
+    expect(prisma.transcodeJob.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        // orgId must come from the viewer's own verified context (org1,
+        // set by the mocked requireViewer above), never a client-supplied
+        // value, and the asset must be published.
+        where: expect.objectContaining({ id: "job1", orgId: "org1", asset: { publishedAt: { not: null } } }),
+      }),
+    );
+  });
+
+  it("returns the rewritten playlist for a published job's hls request", async () => {
+    vi.mocked(prisma.transcodeJob.findFirst).mockResolvedValueOnce({ id: "job1" } as never);
+    vi.mocked(fetchHlsPlaylist).mockResolvedValueOnce({
+      ok: true,
+      body: "#EXTM3U\n",
+      contentType: "application/vnd.apple.mpegurl",
+      cacheControl: "private, max-age=840",
+    });
+    const app = buildApp();
+    const res = await app.inject({ method: "GET", url: "/v1/portal/jobs/job1/hls/master.m3u8" });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe("#EXTM3U\n");
+    expect(res.headers["content-type"]).toBe("application/vnd.apple.mpegurl");
+  });
+});
+
+describe("GET /v1/portal/jobs/:jobId/thumbnails", () => {
+  it("scopes requirePublishedJob's lookup to the viewer's own org and published assets only", async () => {
+    vi.mocked(prisma.transcodeJob.findFirst).mockResolvedValueOnce(null);
+    const app = buildApp();
+    await app.inject({ method: "GET", url: "/v1/portal/jobs/job1/thumbnails" });
+    expect(prisma.transcodeJob.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: "job1", orgId: "org1", asset: { publishedAt: { not: null } } }),
+      }),
+    );
+  });
+
+  it("returns thumbnail URLs for a published job", async () => {
+    vi.mocked(prisma.transcodeJob.findFirst).mockResolvedValueOnce({ id: "job1" } as never);
+    vi.mocked(fetchThumbnailUrls).mockResolvedValueOnce(["https://signed.example/thumb-1.jpg"]);
+    const app = buildApp();
+    const res = await app.inject({ method: "GET", url: "/v1/portal/jobs/job1/thumbnails" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ thumbnails: ["https://signed.example/thumb-1.jpg"] });
   });
 });
 

@@ -7,7 +7,19 @@ vi.mock("@vidforge/proto/auth", () => ({
   })),
 }));
 
-import { authClient, requireViewer, viewerToInternalContext } from "./auth.js";
+import { authClient, requireRole, requireViewer, viewerToInternalContext } from "./auth.js";
+
+describe("requireRole", () => {
+  it("401s when VerifyToken returns a viewerContext instead of a staff context (cross-contamination guard, viewer token vs. requireRole)", async () => {
+    vi.mocked(authClient.verifyToken).mockImplementationOnce((_req, cb: any) =>
+      cb(null, { valid: true, context: undefined, viewerContext: { viewerId: "v1", orgId: "org1" } } as never),
+    );
+    const app = Fastify();
+    app.get("/protected", { preHandler: requireRole("VIEWER") }, async () => ({ ok: true }));
+    const res = await app.inject({ method: "GET", url: "/protected", headers: { authorization: "Bearer viewer-token" } });
+    expect(res.statusCode).toBe(401);
+  });
+});
 
 describe("requireViewer", () => {
   it("401s when VerifyToken returns no viewerContext (e.g. a staff token)", async () => {
