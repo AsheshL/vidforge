@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "@vidforge/db";
 import { z } from "zod";
-import { requireRole } from "../auth.js";
+import { authClient, requireRole } from "../auth.js";
 
 // Org-scoped asset listing with each asset's latest completed job so the
 // UI can link straight to playback. Reads Postgres directly like the dev
@@ -42,6 +42,7 @@ export function registerAssetRoutes(app: FastifyInstance) {
         durationSeconds: a.durationSeconds,
         createdBy: a.createdBy,
         createdAt: a.createdAt,
+        publishedAt: a.publishedAt,
         latestCompletedJobId: a.jobs[0]?.id ?? null,
       })),
       pageInfo: {
@@ -62,6 +63,24 @@ export function registerAssetRoutes(app: FastifyInstance) {
     const updated = await prisma.asset.update({
       where: { id },
       data: { publishedAt: parsed.data.published ? new Date() : null },
+    });
+    // This is the single most consequential action in the portal feature —
+    // it exposes (or hides) a video for an org's entire customer base — so
+    // it goes through auth-svc's generic audit RPC like every other
+    // privileged mutation. Best-effort: the publish state has already
+    // changed, so a hiccup writing the audit trail shouldn't fail the
+    // request or roll back the change.
+    await new Promise<void>((resolve) => {
+      authClient.recordAuditEvent(
+        {
+          context: req.authContext!,
+          action: parsed.data.published ? "asset.publish" : "asset.unpublish",
+          resourceType: "asset",
+          resourceId: updated.id,
+          detailJson: "",
+        },
+        () => resolve(),
+      );
     });
     return reply.send({ assetId: updated.id, publishedAt: updated.publishedAt });
   });
