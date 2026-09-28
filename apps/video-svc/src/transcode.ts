@@ -66,7 +66,24 @@ function probeDuration(path: string): Promise<number> {
   });
 }
 
-function transcodeRendition(
+// Browsers and phone decoders only play 8-bit 4:2:0 H.264. libx264 otherwise
+// keeps the source's chroma format and bit depth, so a 4:4:4 source (screen
+// recordings, ProRes 4444, generated test video) or 10-bit HDR footage comes
+// out as High 4:4:4 / High 10 — valid H.264 that no browser will decode.
+export function renditionOutputOptions(outDir: string, segmentSeconds: number): string[] {
+  return [
+    "-pix_fmt yuv420p",
+    "-profile:v high",
+    "-preset veryfast",
+    "-sc_threshold 0",
+    `-g ${segmentSeconds * 30}`, // keyframe interval aligned to segments
+    "-hls_time " + segmentSeconds,
+    "-hls_playlist_type vod",
+    `-hls_segment_filename ${join(outDir, "seg_%04d.ts")}`,
+  ];
+}
+
+export function transcodeRendition(
   source: string,
   outDir: string,
   r: Rendition,
@@ -82,14 +99,7 @@ function transcodeRendition(
       .size(`${r.width}x${r.height}`)
       .videoBitrate(r.videoBitrateKbps)
       .audioBitrate(r.audioBitrateKbps)
-      .outputOptions([
-        "-preset veryfast",
-        "-sc_threshold 0",
-        `-g ${segmentSeconds * 30}`, // keyframe interval aligned to segments
-        "-hls_time " + segmentSeconds,
-        "-hls_playlist_type vod",
-        `-hls_segment_filename ${join(outDir, "seg_%04d.ts")}`,
-      ])
+      .outputOptions(renditionOutputOptions(outDir, segmentSeconds))
       .output(join(outDir, "playlist.m3u8"))
       .on("progress", (p) => {
         // fluent-ffmpeg's percent is unreliable for HLS; derive from timemark.

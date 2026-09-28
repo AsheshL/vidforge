@@ -17,6 +17,7 @@
     "@vidforge/proto": "workspace:*",
     "@vidforge/queue": "workspace:*",
     "@vidforge/svc-auth": "workspace:^",
+    "@vidforge/webhooks": "workspace:*",
     "bullmq": "^5.34.8"
   },
   "devDependencies": {

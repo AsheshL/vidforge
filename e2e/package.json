@@ -1,0 +1,20 @@
+{
+  "name": "@vidforge/e2e",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "e2e": "playwright test",
+    "e2e:api": "playwright test --project=api",
+    "e2e:ui": "playwright test --project=ui",
+    "e2e:report": "playwright show-report",
+    "lint": "echo ok",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "@types/node": "^18",
+    "ioredis": "^5.10.1",
+    "typescript": "^5.7.2"
+  }
+}

@@ -2,9 +2,9 @@
 # Registers a new ECS task-definition revision that's identical to the
 # current one except for a single container's image, and prints the new
 # revision's ARN. Reads the current definition via `aws ecs
-# describe-task-definition` rather than Terraform, deliberately — this
-# repo's Terraform state is local-only (docs/backlog.md's "Terraform
-# remote state" item), so CI has no way to read or apply it. The
+# describe-task-definition` rather than Terraform, deliberately — CI
+# deploys straight to ECS without running Terraform (docs/backlog.md's
+# "Deploy through Terraform" item). The
 # corresponding aws_ecs_service resources have
 # lifecycle.ignore_changes = [task_definition] so a later `terraform
 # apply` from a workstation doesn't roll a revision registered here back

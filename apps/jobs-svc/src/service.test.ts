@@ -7,7 +7,8 @@ const { getJobsMock, queueEventsOnMock, queueEventsOffMock } = vi.hoisted(() => 
   queueEventsOffMock: vi.fn(),
 }));
 
-vi.mock("@vidforge/queue", () => ({
+vi.mock("@vidforge/queue", async (importOriginal) => ({
+  WEBHOOK_EVENT_TYPES: (await importOriginal<typeof import("@vidforge/queue")>()).WEBHOOK_EVENT_TYPES,
   TRANSCODE_QUEUE: "transcode",
   createRedis: vi.fn(() => ({})),
   createTranscodeQueue: vi.fn(() => ({ getJobs: getJobsMock })),
@@ -125,6 +126,36 @@ describe("registerWebhook", () => {
     expect(err).toMatchObject({ code: status.INVALID_ARGUMENT });
   });
 
+  it("rejects PROGRESS, which webhooks don't deliver", async () => {
+    const callback = vi.fn();
+    await jobQueueServiceImpl.registerWebhook(
+      {
+        request: {
+          context: signedContext(),
+          url: "https://example.com/hook",
+          events: [QueueEventType.QUEUE_EVENT_TYPE_COMPLETED, QueueEventType.QUEUE_EVENT_TYPE_PROGRESS],
+        },
+      } as never,
+      callback,
+    );
+    const [err] = callback.mock.calls[0];
+    expect(err).toMatchObject({ code: status.INVALID_ARGUMENT });
+    expect(err.details).toContain("QUEUE_EVENT_TYPE_PROGRESS");
+  });
+
+  it.each(["http://169.254.169.254/latest/meta-data", "http://10.0.0.5/hook", "http://localhost:8080/hook"])(
+    "rejects an internal target %s",
+    async (url) => {
+      const callback = vi.fn();
+      await jobQueueServiceImpl.registerWebhook(
+        { request: { context: signedContext(), url, events: [QueueEventType.QUEUE_EVENT_TYPE_COMPLETED] } } as never,
+        callback,
+      );
+      const [err] = callback.mock.calls[0];
+      expect(err).toMatchObject({ code: status.INVALID_ARGUMENT });
+    },
+  );
+
   it("generates a signing secret and returns only its last 4 chars as the hint", async () => {
     vi.mocked(prisma.webhook.create).mockImplementation(
       (({ data }: { data: Record<string, unknown> }) =>
@@ -159,6 +190,9 @@ describe("registerWebhook", () => {
 
     const created = vi.mocked(prisma.webhook.create).mock.calls[0][0] as { data: Record<string, unknown> };
     expect(String(created.data.signingSecret).endsWith(res.signingSecretHint)).toBe(true);
+    // The one time the full secret is revealed.
+    expect(res.signingSecret).toBe(created.data.signingSecret);
+    expect(res.signingSecret).toMatch(/^whsec_[0-9a-f]{48}$/);
     expect(created.data.events).toEqual(["QUEUE_EVENT_TYPE_COMPLETED", "QUEUE_EVENT_TYPE_FAILED"]);
     expect(created.data.orgId).toBe("org-1");
   });
@@ -187,6 +221,7 @@ describe("listWebhooks", () => {
     expect(err).toBeNull();
     expect(res.webhooks).toHaveLength(1);
     expect(res.webhooks[0].signingSecretHint).toBe("1234");
+    expect(res.webhooks[0].signingSecret).toBe("");
     expect(res.webhooks[0].events).toEqual([QueueEventType.QUEUE_EVENT_TYPE_COMPLETED]);
   });
 });

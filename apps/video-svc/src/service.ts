@@ -4,9 +4,11 @@ import { prisma, JobState as DbJobState } from "@vidforge/db";
 import {
   createRedis,
   createTranscodeQueue,
+  createWebhookQueue,
   TRANSCODE_CANCEL_CHANNEL,
   TRANSCODE_QUEUE,
 } from "@vidforge/queue";
+import { createWebhookPublisher } from "@vidforge/webhooks";
 import { deletePrefix } from "./storage.js";
 import {
   JobState,
@@ -17,6 +19,7 @@ import type { RequestContext } from "@vidforge/proto/common";
 import { verifyContext } from "@vidforge/svc-auth";
 
 const queue = createTranscodeQueue();
+const publishWebhook = createWebhookPublisher(createWebhookQueue());
 const queueEvents = new QueueEvents(TRANSCODE_QUEUE, { connection: createRedis() });
 const cancelPublisher = createRedis();
 
@@ -75,6 +78,24 @@ function toProtoJob(row: {
   };
 }
 
+// A job may only read a source the caller's org owns. Without this, anyone
+// holding another org's asset id and source key could transcode that
+// video into a job of their own and stream it. Another org's asset is
+// reported exactly like a missing one.
+async function checkOwnedSource(ctx: RequestContext, assetId: string, sourceStorageKey: string) {
+  const asset = await prisma.asset.findUnique({
+    where: { id: assetId },
+    select: { orgId: true, sourceStorageKey: true },
+  });
+  if (!asset || asset.orgId !== ctx.orgId) {
+    return grpcError(status.NOT_FOUND, "asset not found");
+  }
+  if (asset.sourceStorageKey !== sourceStorageKey) {
+    return grpcError(status.INVALID_ARGUMENT, "sourceStorageKey is not this asset's source");
+  }
+  return null;
+}
+
 export const videoServiceImpl: VideoServiceServer = {
   submitTranscodeJob: async (call, callback) => {
     try {
@@ -86,6 +107,8 @@ export const videoServiceImpl: VideoServiceServer = {
           grpcError(status.INVALID_ARGUMENT, "assetId, sourceStorageKey and profile.renditions are required"),
         );
       }
+      const denied = await checkOwnedSource(ctx, req.assetId, req.sourceStorageKey);
+      if (denied) return callback(denied);
 
       // Idempotency: return the existing job if this key was already used.
       if (req.idempotencyKey) {
@@ -137,6 +160,14 @@ export const videoServiceImpl: VideoServiceServer = {
       await prisma.asset.update({
         where: { id: req.assetId },
         data: { status: "PROCESSING" },
+      });
+
+      void publishWebhook({
+        type: "QUEUE_EVENT_TYPE_ENQUEUED",
+        orgId: ctx.orgId,
+        jobId: row.id,
+        assetId: req.assetId,
+        attempt: 1,
       });
 
       callback(null, { jobId: row.id, state: JobState.JOB_STATE_QUEUED });
@@ -325,6 +356,8 @@ export const videoServiceImpl: VideoServiceServer = {
           grpcError(status.INVALID_ARGUMENT, "assetId and sourceStorageKey are required"),
         );
       }
+      const denied = await checkOwnedSource(ctx, req.assetId, req.sourceStorageKey);
+      if (denied) return callback(denied);
 
       // Thumbnails-only job: an empty renditions list tells the worker to
       // skip transcoding entirely and just extract JPEGs (see transcode.ts
@@ -359,6 +392,14 @@ export const videoServiceImpl: VideoServiceServer = {
         },
         { jobId: row.id },
       );
+
+      void publishWebhook({
+        type: "QUEUE_EVENT_TYPE_ENQUEUED",
+        orgId: ctx.orgId,
+        jobId: row.id,
+        assetId: req.assetId,
+        attempt: 1,
+      });
 
       callback(null, { jobId: row.id, state: JobState.JOB_STATE_QUEUED });
     } catch (err) {

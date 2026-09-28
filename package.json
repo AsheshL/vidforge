@@ -12,7 +12,8 @@
     "db:drift-check": "pnpm --filter @vidforge/db db:drift-check",
     "db:generate": "pnpm --filter @vidforge/db db:generate",
     "test": "turbo test",
-    "typecheck": "turbo typecheck"
+    "typecheck": "turbo typecheck",
+    "e2e": "pnpm --filter @vidforge/e2e e2e"
   },
   "devDependencies": {
     "turbo": "^2.3.3",

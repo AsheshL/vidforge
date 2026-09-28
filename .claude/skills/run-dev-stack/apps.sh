@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Bring up the app services (web, api-gateway, auth-svc, video-svc,
-# metadata-svc) via `turbo dev` against the docker dependency stack, and
+# metadata-svc, jobs-svc) via `turbo dev` against the docker dependency stack, and
 # verify the whole chain actually works — not just "ports are listening".
 #
 # Usage:
@@ -45,8 +45,16 @@ echo "--- seed accounts ---"
 # on a fresh DB it creates the accounts, on a reused one it's a no-op.
 (set -a; source .env; set +a; pnpm --filter @vidforge/db db:seed) | tail -2
 
+APP_PORTS=(3000 4000 50051 50052 50053 50054)
+# A plain TCP connect rather than lsof: lsof isn't installed everywhere,
+# and in some sandboxes can't attribute a socket to its process (seen with
+# next dev), reporting nothing even while the port serves requests.
+listening() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
+
 fresh_start=1
-if lsof -i :3000 -i :4000 -i :50051 -i :50052 -i :50053 2>/dev/null | grep -q LISTEN; then
+any_up=0
+for p in "${APP_PORTS[@]}"; do listening "$p" && any_up=1; done
+if [[ "$any_up" == "1" ]]; then
   fresh_start=0
   echo "--- app ports already occupied — assuming stack is already up ---"
 else
@@ -63,11 +71,19 @@ else
 fi
 
 echo "--- waiting for ports ---"
-for i in $(seq 1 30); do
-  lsof -i :3000 -i :4000 -i :50051 -i :50052 -i :50053 2>/dev/null | grep -q ':50053.*LISTEN' && break
+# Wait for *every* app port, not just one: services bind in no fixed order
+# (Next.js is usually last), and the checks below need all of them.
+for i in $(seq 1 60); do
+  missing=()
+  for p in "${APP_PORTS[@]}"; do listening "$p" || missing+=("$p"); done
+  [[ ${#missing[@]} -eq 0 ]] && break
   sleep 1
 done
-lsof -i :3000 -i :4000 -i :50051 -i :50052 -i :50053 2>/dev/null | grep LISTEN
+if [[ ${#missing[@]} -gt 0 ]]; then
+  echo "ports never started listening: ${missing[*]} — check /tmp/vidforge-dev.log" >&2
+  exit 1
+fi
+echo "listening: ${APP_PORTS[*]}"
 
 echo "--- gateway health ---"
 code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4000/healthz)

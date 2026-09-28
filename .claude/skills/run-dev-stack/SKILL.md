@@ -1,6 +1,6 @@
 ---
 name: run-dev-stack
-description: Bring up and verify the local dev/testing stack — postgres, redis, minio, mailpit via docker compose, and (with apps.sh) the full app stack (web, api-gateway, auth-svc, video-svc, metadata-svc) via turbo dev, seeded with one test account per role (viewer/editor/admin/owner) across two orgs. Use when asked to run, start, or test the dev stack, spin up dependencies or the app services for testing, check that postgres/redis/minio/the apps are up and reachable, or seed/log in as a test account for a given role.
+description: Bring up and verify the local dev/testing stack — postgres, redis, minio, mailpit via docker compose, and (with apps.sh) the full app stack (web, api-gateway, auth-svc, video-svc, metadata-svc, jobs-svc) via turbo dev, seeded with one test account per role (viewer/editor/admin/owner) across two orgs. Use when asked to run, start, or test the dev stack, spin up dependencies or the app services for testing, check that postgres/redis/minio/the apps are up and reachable, or seed/log in as a test account for a given role.
 ---
 
 All paths below are relative to the repo root (`video-fs/`).
@@ -40,7 +40,7 @@ Idempotent — safe to re-run against an already-up stack. It:
 Any failed check exits non-zero with the HTTP code / output that
 failed — don't treat "containers Running" as success on its own.
 
-### Full app stack (web + api-gateway + auth-svc + video-svc + metadata-svc)
+### Full app stack (web + api-gateway + auth-svc + video-svc + metadata-svc + jobs-svc)
 
 ```bash
 .claude/skills/run-dev-stack/apps.sh          # deps + apps, verified end to end
@@ -77,6 +77,12 @@ Idempotent — safe to re-run. It:
 Skips the signup round trip when reusing an already-up stack — the
 port + healthz checks already cover that case, and re-hammering signup
 just burns down the shared rate limit for no new information.
+
+## End-to-end suite
+
+Once the stack is up, `pnpm e2e` (plus `docker compose up -d mailpit`) runs
+the Playwright suite in `e2e/` covering every user-facing flow, API and
+browser. See `e2e/README.md` for options and what each spec covers.
 
 ## Seeded accounts (`packages/db/prisma/seed.ts`)
 

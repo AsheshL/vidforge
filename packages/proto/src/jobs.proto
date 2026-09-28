@@ -64,6 +64,9 @@ message Webhook {
   repeated QueueEventType events = 4; // which events trigger delivery
   string signing_secret_hint = 5;     // last 4 chars; full secret shown once
   bool active = 6;
+  // Full signing secret. Set only in RegisterWebhook's response — the one
+  // time it is revealed — and always empty in ListWebhooks.
+  string signing_secret = 7;
 }
 
 message RegisterWebhookRequest {

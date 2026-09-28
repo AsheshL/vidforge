@@ -10,6 +10,7 @@ import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import { credentials } from "@grpc/grpc-js";
 import { VideoServiceClient } from "@vidforge/proto/video";
+import { JobQueueServiceClient } from "@vidforge/proto/jobs";
 import { authClient } from "./auth.js";
 import { createRateLimitRedis, parseAllowedOrigins, parseTrustProxy } from "./config.js";
 import { registerTranscodeRoutes } from "./routes/transcode.js";
@@ -21,6 +22,7 @@ import { registerPortalRoutes } from "./routes/portal.js";
 import { registerOrgRoutes } from "./routes/org.js";
 import { registerDevRoutes } from "./routes/dev.js";
 import { registerViewerRoutes } from "./routes/viewers.js";
+import { registerWebhookRoutes } from "./routes/webhooks.js";
 
 // Behind a load balancer every request arrives from the proxy, so without
 // trustProxy req.ip is the balancer for all of them and the per-IP limits
@@ -58,6 +60,11 @@ const videoClient = new VideoServiceClient(
   credentials.createInsecure(),
 );
 
+const jobsClient = new JobQueueServiceClient(
+  process.env.JOBS_SVC_ADDR ?? "localhost:50054",
+  credentials.createInsecure(),
+);
+
 let draining = false;
 
 // The load balancer polls this. Reporting 503 as soon as the drain starts
@@ -76,6 +83,7 @@ registerPortalRoutes(app, videoClient);
 registerOrgRoutes(app);
 registerDevRoutes(app, videoClient);
 registerViewerRoutes(app);
+registerWebhookRoutes(app, jobsClient);
 
 // Keep under the platform's stop timeout (ECS `stopTimeout`, compose
 // `stop_grace_period`) so the process exits before it is SIGKILLed.
@@ -98,6 +106,7 @@ async function shutdown(signal: NodeJS.Signals) {
     // waits for in-flight requests (tus PATCHes included) before the port drops.
     await app.close();
     videoClient.close();
+    jobsClient.close();
     authClient.close();
     // QUIT throws if the connection is already gone — that is not a reason
     // to exit non-zero, so fall back to dropping the socket.
