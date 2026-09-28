@@ -114,6 +114,22 @@ export function registerOrgRoutes(app: FastifyInstance) {
       data.logoStorageKey = key;
     }
     const org = await prisma.org.update({ where: { id: req.authContext!.orgId }, data });
+    // Same generic audit RPC every other privileged mutation goes through
+    // (see auth-svc's user.invite/apikey.create/etc.). Best-effort: the
+    // identity change has already landed, so a hiccup writing the audit
+    // trail shouldn't fail the request.
+    await new Promise<void>((resolve) => {
+      authClient.recordAuditEvent(
+        {
+          context: req.authContext!,
+          action: "org.update_identity",
+          resourceType: "org",
+          resourceId: req.authContext!.orgId,
+          detailJson: "",
+        },
+        () => resolve(),
+      );
+    });
     return reply.send({ displayName: org.displayName, logoStorageKey: org.logoStorageKey });
   });
 

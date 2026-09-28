@@ -12,13 +12,16 @@ vi.mock("@aws-sdk/client-s3", () => ({
 }));
 
 vi.mock("../auth.js", () => ({
-  authClient: {},
+  authClient: {
+    recordAuditEvent: vi.fn((_req, cb: any) => cb(null, { eventId: "event-1" })),
+  },
   requireRole: () => async (req: { authContext?: unknown }) => {
     req.authContext = { orgId: "org-1", userId: "admin-1", roles: ["ADMIN"] };
   },
 }));
 
 import { prisma } from "@vidforge/db";
+import { authClient } from "../auth.js";
 import { registerOrgRoutes } from "./org.js";
 
 function buildApp() {
@@ -34,6 +37,16 @@ describe("PATCH /v1/org", () => {
     const res = await app.inject({ method: "PATCH", url: "/v1/org", payload: { displayName: "Acme Streaming" } });
     expect(res.statusCode).toBe(200);
     expect(prisma.org.update).toHaveBeenCalledWith({ where: { id: "org-1" }, data: { displayName: "Acme Streaming" } });
+  });
+
+  it("records an audit event for the identity change", async () => {
+    vi.mocked(prisma.org.update).mockResolvedValueOnce({ displayName: "Acme Streaming", logoStorageKey: null } as never);
+    const app = buildApp();
+    await app.inject({ method: "PATCH", url: "/v1/org", payload: { displayName: "Acme Streaming" } });
+    expect(authClient.recordAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "org.update_identity", resourceType: "org", resourceId: "org-1" }),
+      expect.any(Function),
+    );
   });
 
   it("rejects a non-image data URI for the logo", async () => {
