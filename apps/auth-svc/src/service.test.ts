@@ -64,10 +64,14 @@ describe("signUp", () => {
 describe("signUp org slug", () => {
   it("derives a url-safe slug from the org name", async () => {
     vi.mocked(prisma.user.findUnique).mockResolvedValueOnce(null);
-    vi.mocked(prisma.org.findUnique).mockResolvedValueOnce(null); // no collision
     vi.mocked(prisma.$transaction).mockImplementationOnce(async (fn) =>
       fn({
-        org: { create: vi.fn().mockResolvedValue({ id: "org1", slug: "acme-inc" }) },
+        // findUnique lives on tx, not the top-level prisma client — the
+        // collision loop must run on the transaction's own connection.
+        org: {
+          findUnique: vi.fn().mockResolvedValue(null), // no collision
+          create: vi.fn().mockResolvedValue({ id: "org1", slug: "acme-inc" }),
+        },
         user: {
           create: vi.fn().mockResolvedValue({
             id: "u1", email: "a@b.com", displayName: "A", orgId: "org1", role: "OWNER",
@@ -83,6 +87,34 @@ describe("signUp org slug", () => {
 
     await authServiceImpl.signUp(call, callback);
 
+    expect(callback).toHaveBeenCalledWith(null, expect.objectContaining({ token: expect.any(String) }));
+  });
+
+  it("retries once with a random suffix when two signups race to create the same slug", async () => {
+    vi.mocked(prisma.user.findUnique).mockResolvedValueOnce(null);
+    const create = vi
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error("Unique constraint failed"), { code: "P2002" }))
+      .mockResolvedValueOnce({ id: "org1", slug: "acme-inc-abc123" });
+    vi.mocked(prisma.$transaction).mockImplementationOnce(async (fn) =>
+      fn({
+        org: { findUnique: vi.fn().mockResolvedValue(null), create },
+        user: {
+          create: vi.fn().mockResolvedValue({
+            id: "u1", email: "a@b.com", displayName: "A", orgId: "org1", role: "OWNER",
+          }),
+        },
+      } as never),
+    );
+
+    const callback = vi.fn();
+    const call = {
+      request: { email: "a@b.com", password: "smoketestpassword123", displayName: "A", orgName: "Acme, Inc!" },
+    } as Parameters<typeof authServiceImpl.signUp>[0];
+
+    await authServiceImpl.signUp(call, callback);
+
+    expect(create).toHaveBeenCalledTimes(2);
     expect(callback).toHaveBeenCalledWith(null, expect.objectContaining({ token: expect.any(String) }));
   });
 });
@@ -372,9 +404,9 @@ describe("inviteViewer", () => {
     expect(callback).toHaveBeenCalledWith(null, expect.objectContaining({ email: "viewer@example.com" }));
   });
 
-  it("rejects re-inviting an already-activated viewer as a no-op", async () => {
+  it("rejects re-inviting an already-activated, non-revoked viewer as a no-op", async () => {
     vi.mocked(prisma.viewer.findUnique).mockResolvedValueOnce({
-      id: "viewer1", orgId: "org1", email: "viewer@example.com", activatedAt: new Date(),
+      id: "viewer1", orgId: "org1", email: "viewer@example.com", activatedAt: new Date(), revokedAt: null,
     } as never);
     const callback = vi.fn();
     await authServiceImpl.inviteViewer(
@@ -382,6 +414,60 @@ describe("inviteViewer", () => {
       callback,
     );
     expect(callback).toHaveBeenCalledWith(expect.objectContaining({ code: status.ALREADY_EXISTS }));
+    expect(prisma.viewer.update).not.toHaveBeenCalled();
+  });
+
+  it("re-invites a pending (un-activated) viewer, rotating invitedAt and clearing any revocation", async () => {
+    vi.mocked(prisma.viewer.findUnique).mockResolvedValueOnce({
+      id: "viewer1", orgId: "org1", email: "viewer@example.com", activatedAt: null, revokedAt: null,
+    } as never);
+    vi.mocked(prisma.viewer.update).mockResolvedValueOnce({
+      id: "viewer1", orgId: "org1", email: "viewer@example.com",
+      invitedAt: new Date(), activatedAt: null, revokedAt: null,
+    } as never);
+    vi.mocked(prisma.org.findUnique).mockResolvedValueOnce({ id: "org1", name: "Acme", slug: "acme", displayName: null } as never);
+    vi.mocked(prisma.user.findUnique).mockResolvedValueOnce({ id: "admin1", displayName: "Ada Admin" } as never);
+
+    const callback = vi.fn();
+    await authServiceImpl.inviteViewer(
+      { request: { context: staffCtx, email: "viewer@example.com" } } as never,
+      callback,
+    );
+
+    expect(prisma.viewer.update).toHaveBeenCalledWith({
+      where: { id: "viewer1" },
+      data: { invitedAt: expect.any(Date), revokedAt: null },
+    });
+    expect(sendViewerInviteEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "viewer@example.com" }));
+    const [err, res] = callback.mock.calls[0];
+    expect(err).toBeNull();
+    expect(res).toMatchObject({ email: "viewer@example.com" });
+  });
+
+  it("allows re-inviting an activated viewer who was revoked, reinstating them (revocation is reversible)", async () => {
+    vi.mocked(prisma.viewer.findUnique).mockResolvedValueOnce({
+      id: "viewer1", orgId: "org1", email: "viewer@example.com",
+      activatedAt: new Date("2026-01-01"), revokedAt: new Date("2026-06-01"),
+    } as never);
+    vi.mocked(prisma.viewer.update).mockResolvedValueOnce({
+      id: "viewer1", orgId: "org1", email: "viewer@example.com",
+      invitedAt: new Date(), activatedAt: new Date("2026-01-01"), revokedAt: null,
+    } as never);
+    vi.mocked(prisma.org.findUnique).mockResolvedValueOnce({ id: "org1", name: "Acme", slug: "acme", displayName: null } as never);
+    vi.mocked(prisma.user.findUnique).mockResolvedValueOnce({ id: "admin1", displayName: "Ada Admin" } as never);
+
+    const callback = vi.fn();
+    await authServiceImpl.inviteViewer(
+      { request: { context: staffCtx, email: "viewer@example.com" } } as never,
+      callback,
+    );
+
+    expect(prisma.viewer.update).toHaveBeenCalledWith({
+      where: { id: "viewer1" },
+      data: { invitedAt: expect.any(Date), revokedAt: null },
+    });
+    const [err] = callback.mock.calls[0];
+    expect(err).toBeNull();
   });
 });
 
