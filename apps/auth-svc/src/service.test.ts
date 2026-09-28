@@ -10,17 +10,27 @@ vi.mock("@vidforge/db", async (importOriginal) => {
       user: { findUnique: vi.fn() },
       org: { findUnique: vi.fn() },
       apiKey: { create: vi.fn(), update: vi.fn(), findUnique: vi.fn(), findMany: vi.fn() },
+      viewer: { findUnique: vi.fn(), update: vi.fn(), create: vi.fn(), findMany: vi.fn(), count: vi.fn() },
       auditEvent: { create: vi.fn() },
       $transaction: vi.fn(),
     },
   };
 });
 
+vi.mock("./mailer.js", () => ({
+  sendInviteEmail: vi.fn(),
+  sendViewerInviteEmail: vi.fn(),
+}));
+
 import { prisma } from "@vidforge/db";
 import { Role } from "@vidforge/proto/auth";
 import { signContext } from "@vidforge/svc-auth";
 import { authServiceImpl } from "./service.js";
 import { hashPassword } from "./password.js";
+import { sendViewerInviteEmail } from "./mailer.js";
+import { signToken, signViewerActivationToken, signViewerToken } from "./jwt.js";
+
+const staffCtx = signContext({ userId: "admin1", orgId: "org1", roles: ["ADMIN"], traceId: "t1" });
 
 describe("signUp", () => {
   it("returns an INTERNAL grpc error instead of crashing the process when the database call fails", async () => {
@@ -327,5 +337,206 @@ describe("verifyToken with API keys", () => {
     );
 
     expect(callback).toHaveBeenCalledWith(null, { valid: false, context: undefined, expiresAt: undefined });
+  });
+});
+
+describe("inviteViewer", () => {
+  it("rejects callers below ADMIN", async () => {
+    const ctx = signContext({ userId: "u1", orgId: "org1", roles: ["EDITOR"], traceId: "t1" });
+    const callback = vi.fn();
+    await authServiceImpl.inviteViewer(
+      { request: { context: ctx, email: "viewer@example.com" } } as never,
+      callback,
+    );
+    expect(callback).toHaveBeenCalledWith(expect.objectContaining({ code: status.PERMISSION_DENIED }));
+  });
+
+  it("creates a pending viewer and emails an activation link", async () => {
+    vi.mocked(prisma.viewer.findUnique).mockResolvedValueOnce(null);
+    vi.mocked(prisma.viewer.create).mockResolvedValueOnce({
+      id: "viewer1", orgId: "org1", email: "viewer@example.com",
+      invitedAt: new Date(), activatedAt: null, revokedAt: null,
+    } as never);
+    vi.mocked(prisma.org.findUnique).mockResolvedValueOnce({ id: "org1", name: "Acme", slug: "acme", displayName: null } as never);
+    vi.mocked(prisma.user.findUnique).mockResolvedValueOnce({ id: "admin1", displayName: "Ada Admin" } as never);
+
+    const callback = vi.fn();
+    await authServiceImpl.inviteViewer(
+      { request: { context: staffCtx, email: "viewer@example.com" } } as never,
+      callback,
+    );
+
+    expect(sendViewerInviteEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "viewer@example.com", orgName: "Acme" }),
+    );
+    expect(callback).toHaveBeenCalledWith(null, expect.objectContaining({ email: "viewer@example.com" }));
+  });
+
+  it("rejects re-inviting an already-activated viewer as a no-op", async () => {
+    vi.mocked(prisma.viewer.findUnique).mockResolvedValueOnce({
+      id: "viewer1", orgId: "org1", email: "viewer@example.com", activatedAt: new Date(),
+    } as never);
+    const callback = vi.fn();
+    await authServiceImpl.inviteViewer(
+      { request: { context: staffCtx, email: "viewer@example.com" } } as never,
+      callback,
+    );
+    expect(callback).toHaveBeenCalledWith(expect.objectContaining({ code: status.ALREADY_EXISTS }));
+  });
+});
+
+describe("revokeViewer", () => {
+  it("404s for a viewer in a different org", async () => {
+    vi.mocked(prisma.viewer.findUnique).mockResolvedValueOnce({ id: "v1", orgId: "org-other" } as never);
+    const callback = vi.fn();
+    await authServiceImpl.revokeViewer({ request: { context: staffCtx, viewerId: "v1" } } as never, callback);
+    expect(callback).toHaveBeenCalledWith(expect.objectContaining({ code: status.NOT_FOUND }));
+  });
+
+  it("sets revokedAt for a viewer in the caller's org", async () => {
+    vi.mocked(prisma.viewer.findUnique).mockResolvedValueOnce({ id: "v1", orgId: "org1" } as never);
+    vi.mocked(prisma.viewer.update).mockResolvedValueOnce({} as never);
+    const callback = vi.fn();
+    await authServiceImpl.revokeViewer({ request: { context: staffCtx, viewerId: "v1" } } as never, callback);
+    expect(prisma.viewer.update).toHaveBeenCalledWith({
+      where: { id: "v1" },
+      data: { revokedAt: expect.any(Date) },
+    });
+    expect(callback).toHaveBeenCalledWith(null, { revoked: true });
+  });
+});
+
+describe("activateViewer", () => {
+  it("rejects an expired or malformed token", async () => {
+    const callback = vi.fn();
+    await authServiceImpl.activateViewer(
+      { request: { orgSlug: "acme", token: "garbage", password: "longenoughpassword" } } as never,
+      callback,
+    );
+    expect(callback).toHaveBeenCalledWith(expect.objectContaining({ code: status.UNAUTHENTICATED }));
+  });
+
+  it("rejects activating an already-activated account", async () => {
+    vi.stubEnv("JWT_SECRET", "current-secret");
+    const { token } = await signViewerActivationToken({ sub: "viewer1" });
+    vi.mocked(prisma.viewer.findUnique).mockResolvedValueOnce({
+      id: "viewer1", orgId: "org1", activatedAt: new Date(), revokedAt: null,
+    } as never);
+    vi.mocked(prisma.org.findUnique).mockResolvedValueOnce({ id: "org1", slug: "acme" } as never);
+
+    const callback = vi.fn();
+    await authServiceImpl.activateViewer(
+      { request: { orgSlug: "acme", token, password: "longenoughpassword" } } as never,
+      callback,
+    );
+    expect(callback).toHaveBeenCalledWith(expect.objectContaining({ code: status.ALREADY_EXISTS }));
+  });
+
+  it("activates a pending viewer and returns a session", async () => {
+    vi.stubEnv("JWT_SECRET", "current-secret");
+    const { token } = await signViewerActivationToken({ sub: "viewer1" });
+    vi.mocked(prisma.viewer.findUnique).mockResolvedValueOnce({
+      id: "viewer1", orgId: "org1", activatedAt: null, revokedAt: null,
+    } as never);
+    vi.mocked(prisma.org.findUnique).mockResolvedValueOnce({ id: "org1", slug: "acme" } as never);
+    vi.mocked(prisma.viewer.update).mockResolvedValueOnce({
+      id: "viewer1", orgId: "org1", email: "v@example.com", invitedAt: new Date(), activatedAt: new Date(),
+    } as never);
+
+    const callback = vi.fn();
+    await authServiceImpl.activateViewer(
+      { request: { orgSlug: "acme", token, password: "longenoughpassword" } } as never,
+      callback,
+    );
+    expect(callback).toHaveBeenCalledWith(null, expect.objectContaining({ token: expect.any(String) }));
+  });
+});
+
+describe("verifyToken — viewer tokens", () => {
+  it("returns a ViewerContext, never a staff context, for a viewer token", async () => {
+    vi.stubEnv("JWT_SECRET", "current-secret");
+    const { token } = await signViewerToken({ sub: "viewer1", org: "org1" });
+    vi.mocked(prisma.viewer.findUnique).mockResolvedValueOnce({
+      id: "viewer1", orgId: "org1", activatedAt: new Date(), revokedAt: null,
+    } as never);
+
+    const callback = vi.fn();
+    await authServiceImpl.verifyToken({ request: { token } } as never, callback);
+
+    expect(callback).toHaveBeenCalledWith(
+      null,
+      expect.objectContaining({ valid: true, context: undefined, viewerContext: { viewerId: "viewer1", orgId: "org1" } }),
+    );
+  });
+
+  it("rejects a viewer token for a viewer that no longer exists", async () => {
+    vi.stubEnv("JWT_SECRET", "current-secret");
+    const { token } = await signViewerToken({ sub: "viewer1", org: "org1" });
+    vi.mocked(prisma.viewer.findUnique).mockResolvedValueOnce(null);
+
+    const callback = vi.fn();
+    await authServiceImpl.verifyToken({ request: { token } } as never, callback);
+
+    expect(callback).toHaveBeenCalledWith(null, expect.objectContaining({ valid: false }));
+  });
+
+  it("rejects an already-issued session token the instant the viewer is revoked — revocation isn't just a login-time check", async () => {
+    vi.stubEnv("JWT_SECRET", "current-secret");
+    const { token } = await signViewerToken({ sub: "viewer1", org: "org1" });
+    vi.mocked(prisma.viewer.findUnique).mockResolvedValueOnce({
+      id: "viewer1", orgId: "org1", activatedAt: new Date("2026-01-01"), revokedAt: new Date("2026-09-28"),
+    } as never);
+
+    const callback = vi.fn();
+    await authServiceImpl.verifyToken({ request: { token } } as never, callback);
+
+    expect(callback).toHaveBeenCalledWith(null, expect.objectContaining({ valid: false }));
+  });
+
+  it("a staff token never resolves to a ViewerContext (cross-contamination guard)", async () => {
+    vi.stubEnv("JWT_SECRET", "current-secret");
+    const { token } = await signToken({ sub: "user1", org: "org1", role: "ADMIN" });
+    vi.mocked(prisma.user.findUnique).mockResolvedValueOnce({
+      id: "user1", orgId: "org1", role: "ADMIN", mustChangePassword: false,
+    } as never);
+
+    const callback = vi.fn();
+    await authServiceImpl.verifyToken({ request: { token } } as never, callback);
+
+    const [, res] = callback.mock.calls[0];
+    expect(res.viewerContext).toBeUndefined();
+    expect(res.context).toBeDefined();
+  });
+});
+
+describe("viewerLogin", () => {
+  it("rejects a revoked viewer even with the correct password", async () => {
+    vi.mocked(prisma.org.findUnique).mockResolvedValueOnce({ id: "org1", slug: "acme" } as never);
+    vi.mocked(prisma.viewer.findUnique).mockResolvedValueOnce({
+      id: "viewer1", orgId: "org1", passwordHash: await hashPassword("correcthorsebattery"), revokedAt: new Date(),
+    } as never);
+
+    const callback = vi.fn();
+    await authServiceImpl.viewerLogin(
+      { request: { orgSlug: "acme", email: "v@example.com", password: "correcthorsebattery" } } as never,
+      callback,
+    );
+    expect(callback).toHaveBeenCalledWith(expect.objectContaining({ code: status.UNAUTHENTICATED }));
+  });
+
+  it("logs in an activated, non-revoked viewer", async () => {
+    vi.mocked(prisma.org.findUnique).mockResolvedValueOnce({ id: "org1", slug: "acme" } as never);
+    vi.mocked(prisma.viewer.findUnique).mockResolvedValueOnce({
+      id: "viewer1", orgId: "org1", email: "v@example.com",
+      passwordHash: await hashPassword("correcthorsebattery"), revokedAt: null,
+      invitedAt: new Date(), activatedAt: new Date(),
+    } as never);
+
+    const callback = vi.fn();
+    await authServiceImpl.viewerLogin(
+      { request: { orgSlug: "acme", email: "v@example.com", password: "correcthorsebattery" } } as never,
+      callback,
+    );
+    expect(callback).toHaveBeenCalledWith(null, expect.objectContaining({ token: expect.any(String) }));
   });
 });
