@@ -19,11 +19,21 @@ export default function WatchPage() {
     if (!jobId) return;
     let cancelled = false;
     void (async () => {
-      const res = await portalFetch(orgSlug, `/v1/portal/progress`);
-      if (!res.ok || cancelled) return;
-      const rows = ((await res.json()).progress ?? []) as ProgressEntry[];
-      const mine = rows.find((r) => r.assetId === assetId);
-      if (!cancelled) setStartPosition(mine?.positionSeconds ?? 0);
+      try {
+        const res = await portalFetch(orgSlug, `/v1/portal/progress`);
+        if (cancelled) return;
+        if (!res.ok) {
+          // A failed lookup should degrade to "play from the start," not
+          // hide the player forever (Finding 2).
+          setStartPosition(0);
+          return;
+        }
+        const rows = ((await res.json()).progress ?? []) as ProgressEntry[];
+        const mine = rows.find((r) => r.assetId === assetId);
+        if (!cancelled) setStartPosition(mine?.positionSeconds ?? 0);
+      } catch {
+        if (!cancelled) setStartPosition(0);
+      }
     })();
     return () => {
       cancelled = true;
