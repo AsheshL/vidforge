@@ -3,15 +3,37 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@vidforge/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@vidforge/db")>();
-  return { ...actual, prisma: { ...actual.prisma, org: { findUnique: vi.fn() } } };
+  return {
+    ...actual,
+    prisma: {
+      ...actual.prisma,
+      org: { findUnique: vi.fn() },
+      asset: { findMany: vi.fn(), count: vi.fn(), findFirst: vi.fn() },
+      transcodeJob: { findFirst: vi.fn() },
+    },
+  };
 });
 
 vi.mock("../auth.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../auth.js")>();
-  return { ...actual, authClient: { activateViewer: vi.fn(), viewerLogin: vi.fn() } };
+  return {
+    ...actual,
+    authClient: { activateViewer: vi.fn(), viewerLogin: vi.fn() },
+    requireViewer: () => async (req: { viewerContext?: unknown }) => {
+      req.viewerContext = { viewerId: "v1", orgId: "org1" };
+    },
+    viewerToInternalContext: () => ({
+      userId: "v1", orgId: "org1", roles: ["VIEWER"], traceId: "t", issuedAtMs: 0, signature: "s",
+    }),
+  };
 });
 
-vi.mock("./playback.js", () => ({ presign: vi.fn().mockResolvedValue("https://signed.example/logo.png") }));
+vi.mock("./playback.js", () => ({
+  presign: vi.fn().mockResolvedValue("https://signed.example/logo.png"),
+  fetchHlsPlaylist: vi.fn(),
+  fetchThumbnailUrls: vi.fn(),
+  SIGNED_URL_TTL_SECONDS: 900,
+}));
 
 import { prisma } from "@vidforge/db";
 import { authClient } from "../auth.js";
@@ -59,5 +81,40 @@ describe("POST /v1/portal/auth/login", () => {
       payload: { orgSlug: "acme", email: "a@b.com", password: "x" },
     });
     expect(res.statusCode).toBe(401);
+  });
+});
+
+describe("GET /v1/portal/library", () => {
+  it("only returns published assets, scoped to the viewer's org", async () => {
+    vi.mocked(prisma.asset.findMany).mockResolvedValueOnce([]);
+    vi.mocked(prisma.asset.count).mockResolvedValueOnce(0);
+    const app = buildApp();
+    await app.inject({ method: "GET", url: "/v1/portal/library" });
+    expect(prisma.asset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ orgId: "org1", publishedAt: { not: null } }),
+      }),
+    );
+  });
+
+  it("filters by title when q is given", async () => {
+    vi.mocked(prisma.asset.findMany).mockResolvedValueOnce([]);
+    vi.mocked(prisma.asset.count).mockResolvedValueOnce(0);
+    const app = buildApp();
+    await app.inject({ method: "GET", url: "/v1/portal/library?q=dragon" });
+    expect(prisma.asset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ title: { contains: "dragon", mode: "insensitive" } }),
+      }),
+    );
+  });
+});
+
+describe("GET /v1/portal/jobs/:jobId/hls/*", () => {
+  it("404s when the job's asset isn't published in the viewer's org", async () => {
+    vi.mocked(prisma.transcodeJob.findFirst).mockResolvedValueOnce(null);
+    const app = buildApp();
+    const res = await app.inject({ method: "GET", url: "/v1/portal/jobs/job1/hls/master.m3u8" });
+    expect(res.statusCode).toBe(404);
   });
 });
