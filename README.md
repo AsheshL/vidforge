@@ -112,6 +112,15 @@ These are the things that differ from dev and will bite if missed:
   and `VIDEO_SVC_ADDR` (service-discovery names in prod), defaulting to
   `localhost` for dev.
 
+## Diagrams
+
+Interactive architecture and sequence diagrams (source specs in
+[docs/diagrams](docs/diagrams)):
+
+- [Viewer Portal — System Architecture](https://asheshl.github.io/vidforge/viewer-portal/architecture.html)
+- [Viewer Portal — Invite & Activation](https://asheshl.github.io/vidforge/viewer-portal/onboarding-sequence.html)
+- [Viewer Portal — Publish-Gated Playback](https://asheshl.github.io/vidforge/viewer-portal/playback-sequence.html)
+
 ## Layout
 
 ```
