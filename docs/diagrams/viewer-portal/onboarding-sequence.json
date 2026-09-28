@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Viewer Invite & Activation",
+    "output": "viewer-onboarding.sequence.html",
+    "viewBox": [1060, 620],
+    "column_fit": "spread",
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "invite", "label": "Invite", "focus": ["admin", "web", "gateway", "authsvc"], "note": "Only ADMIN+ staff can invite; the Viewer row starts unactivated." },
+      { "id": "delivery", "label": "Delivery", "focus": ["authsvc", "mail", "human"], "note": "A signed, single-purpose activation token travels by email, not a temp password." },
+      { "id": "activate", "label": "Activate", "focus": ["human", "viewerapp", "gateway", "authsvc"], "note": "Activation sets the password and returns a full viewer session in one step." }
+    ]
+  },
+  "participants": [
+    { "id": "admin", "type": "external", "label": "Admin", "sublabel": "staff" },
+    { "id": "web", "type": "frontend", "label": "apps/web" },
+    { "id": "gateway", "type": "backend", "label": "api-gateway" },
+    { "id": "authsvc", "type": "security", "label": "auth-svc" },
+    { "id": "mail", "type": "cloud", "label": "SES", "sublabel": "mailer" },
+    { "id": "human", "type": "external", "label": "Viewer", "sublabel": "customer" },
+    { "id": "viewerapp", "type": "frontend", "label": "apps/viewer" }
+  ],
+  "segments": [
+    { "from": 150, "to": 246, "label": "Invite" },
+    { "from": 256, "to": 306, "label": "Delivery" },
+    { "from": 316, "to": 446, "label": "Activate & sign in" }
+  ],
+  "messages": [
+    { "id": "admin-invite", "from": "admin", "to": "web", "y": 160, "label": "invite viewer", "variant": "default" },
+    { "id": "web-invite-post", "from": "web", "to": "gateway", "y": 188, "label": "POST /v1/viewers/invite", "variant": "emphasis" },
+    { "id": "gateway-invite-rpc", "from": "gateway", "to": "authsvc", "y": 216, "label": "InviteViewer", "variant": "security" },
+    { "id": "authsvc-send-mail", "from": "authsvc", "to": "mail", "y": 244, "label": "send activation link", "variant": "dashed", "note": "creates Viewer row, activatedAt: null" },
+    { "id": "mail-to-human", "from": "mail", "to": "human", "y": 272, "label": "activation email", "variant": "dashed" },
+    { "id": "human-open-link", "from": "human", "to": "viewerapp", "y": 300, "label": "open activation link", "variant": "default" },
+    { "id": "viewerapp-activate-post", "from": "viewerapp", "to": "gateway", "y": 328, "label": "POST /v1/portal/auth/activate", "variant": "emphasis" },
+    { "id": "gateway-activate-rpc", "from": "gateway", "to": "authsvc", "y": 356, "label": "ActivateViewer", "variant": "security" },
+    { "id": "authsvc-session", "from": "authsvc", "to": "gateway", "y": 384, "label": "session + viewer", "variant": "return", "note": "sets passwordHash, activatedAt" },
+    { "id": "gateway-200", "from": "gateway", "to": "viewerapp", "y": 412, "label": "200 { token, viewer }", "variant": "return" },
+    { "id": "viewerapp-signed-in", "from": "viewerapp", "to": "human", "y": 440, "label": "signed in → library", "variant": "return" }
+  ],
+  "activations": [
+    { "participant": "web", "from": 183, "to": 194, "type": "frontend" },
+    { "participant": "gateway", "from": 188, "to": 418, "type": "backend" },
+    { "participant": "authsvc", "from": 216, "to": 250, "type": "security" },
+    { "participant": "authsvc", "from": 356, "to": 390, "type": "security" },
+    { "participant": "viewerapp", "from": 300, "to": 446, "type": "frontend" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Invite is idempotent", "items": ["Re-inviting an un-activated viewer rotates the token", "Re-inviting an already-activated viewer is rejected as a no-op"] },
+    { "dot": "emerald", "title": "Single-purpose token", "items": ["The activation token's kind is viewer_activate, not viewer", "A session token can never be used to activate an account"] },
+    { "dot": "rose", "title": "Structural identity", "items": ["The returned session token's kind is viewer", "VerifyToken decodes it into a ViewerContext, never a staff RequestContext"] }
+  ]
+}
