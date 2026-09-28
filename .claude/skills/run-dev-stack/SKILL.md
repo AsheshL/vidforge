@@ -1,6 +1,6 @@
 ---
 name: run-dev-stack
-description: Bring up and verify the local dev/testing stack — postgres, redis, minio, mailpit via docker compose, and (with apps.sh) the full app stack (web, api-gateway, auth-svc, video-svc, metadata-svc, jobs-svc) via turbo dev, seeded with one test account per role (viewer/editor/admin/owner) across two orgs. Use when asked to run, start, or test the dev stack, spin up dependencies or the app services for testing, check that postgres/redis/minio/the apps are up and reachable, or seed/log in as a test account for a given role.
+description: Bring up and verify the local dev/testing stack — postgres, redis, minio, mailpit via docker compose, and (with apps.sh) the full app stack (web, viewer, api-gateway, auth-svc, video-svc, metadata-svc, jobs-svc) via turbo dev, seeded with one test account per role (viewer/editor/admin/owner) across two orgs. Use when asked to run, start, or test the dev stack, spin up dependencies or the app services for testing, check that postgres/redis/minio/the apps are up and reachable, or seed/log in as a test account for a given role.
 ---
 
 All paths below are relative to the repo root (`video-fs/`).
@@ -40,7 +40,7 @@ Idempotent — safe to re-run against an already-up stack. It:
 Any failed check exits non-zero with the HTTP code / output that
 failed — don't treat "containers Running" as success on its own.
 
-### Full app stack (web + api-gateway + auth-svc + video-svc + metadata-svc + jobs-svc)
+### Full app stack (web + viewer + api-gateway + auth-svc + video-svc + metadata-svc + jobs-svc)
 
 ```bash
 .claude/skills/run-dev-stack/apps.sh          # deps + apps, verified end to end
@@ -63,7 +63,7 @@ Idempotent — safe to re-run. It:
    `turbo run dev --env-mode=loose` (background, logs to
    `/tmp/vidforge-dev.log`) and waits for ports to open. If already
    occupied, assumes the stack is up and skips straight to verification.
-6. Checks `GET /healthz` on the gateway (`200`) and `GET /` on web (`200`).
+6. Checks `GET /healthz` on the gateway (`200`) and `GET /` on both web (`200`) and viewer (`200`).
 7. Logs in as `owner@vidforge.test` via `POST /v1/dev/login` (`200`) —
    proves the seeded accounts actually work through the real
    web→gateway→auth-svc→postgres chain, not just that rows exist.

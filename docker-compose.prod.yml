@@ -168,3 +168,16 @@ services:
     depends_on:
       api-gateway:
         condition: service_healthy
+
+  viewer:
+    build:
+      context: .
+      dockerfile: apps/viewer/Dockerfile
+      args:
+        NEXT_PUBLIC_GATEWAY_URL: http://localhost:4100
+    init: true
+    ports:
+      - "3101:3000"
+    depends_on:
+      api-gateway:
+        condition: service_healthy

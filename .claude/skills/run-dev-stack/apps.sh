@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Bring up the app services (web, api-gateway, auth-svc, video-svc,
+# Bring up the app services (web, viewer, api-gateway, auth-svc, video-svc,
 # metadata-svc, jobs-svc) via `turbo dev` against the docker dependency stack, and
 # verify the whole chain actually works — not just "ports are listening".
 #
@@ -45,7 +45,7 @@ echo "--- seed accounts ---"
 # on a fresh DB it creates the accounts, on a reused one it's a no-op.
 (set -a; source .env; set +a; pnpm --filter @vidforge/db db:seed) | tail -2
 
-APP_PORTS=(3000 4000 50051 50052 50053 50054)
+APP_PORTS=(3000 3001 4000 50051 50052 50053 50054)
 # A plain TCP connect rather than lsof: lsof isn't installed everywhere,
 # and in some sandboxes can't attribute a socket to its process (seen with
 # next dev), reporting nothing even while the port serves requests.
@@ -93,6 +93,11 @@ echo "healthz: $code"
 echo "--- web ---"
 code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/)
 [[ "$code" == "200" ]] || { echo "web root failed: HTTP $code — check /tmp/vidforge-dev.log" >&2; exit 1; }
+echo "root: $code"
+
+echo "--- viewer ---"
+code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3001/)
+[[ "$code" == "200" ]] || { echo "viewer root failed: HTTP $code — check /tmp/vidforge-dev.log" >&2; exit 1; }
 echo "root: $code"
 
 echo "--- seeded dev account login ---"
