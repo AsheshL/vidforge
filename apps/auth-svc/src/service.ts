@@ -109,7 +109,7 @@ export const authServiceImpl: AuthServiceServer = {
           (key.expiresAt && key.expiresAt < now) ||
           !(await verifyPassword(token, key.secretHash))
         ) {
-          return callback(null, { valid: false, context: undefined, expiresAt: undefined });
+          return callback(null, { valid: false, context: undefined, viewerContext: undefined, expiresAt: undefined });
         }
         callback(null, {
           valid: true,
@@ -124,22 +124,35 @@ export const authServiceImpl: AuthServiceServer = {
             issuedAtMs: 0,
             signature: "",
           },
+          viewerContext: undefined,
           expiresAt: key.expiresAt ?? undefined,
         });
       } catch {
-        callback(null, { valid: false, context: undefined, expiresAt: undefined });
+        callback(null, { valid: false, context: undefined, viewerContext: undefined, expiresAt: undefined });
       }
       return;
     }
     try {
       const claims = await verifyJwt(call.request.token);
+      if (claims.kind === "viewer") {
+        const viewer = await prisma.viewer.findUnique({ where: { id: claims.sub } });
+        if (!viewer || !viewer.activatedAt || viewer.revokedAt) {
+          return callback(null, { valid: false, context: undefined, viewerContext: undefined, expiresAt: undefined });
+        }
+        return callback(null, {
+          valid: true,
+          context: undefined,
+          viewerContext: { viewerId: viewer.id, orgId: viewer.orgId },
+          expiresAt: new Date(claims.exp * 1000),
+        });
+      }
       // Role and org come fresh from the DB, not the token, so role
       // changes and deleted users take effect within a token's lifetime.
       const user = await prisma.user.findUnique({ where: { id: claims.sub } });
       // A user on a temporary password has no business holding a session:
       // any token from before the invite (or a leak) is rejected here.
       if (!user || user.mustChangePassword) {
-        return callback(null, { valid: false, context: undefined, expiresAt: undefined });
+        return callback(null, { valid: false, context: undefined, viewerContext: undefined, expiresAt: undefined });
       }
       callback(null, {
         valid: true,
@@ -152,10 +165,11 @@ export const authServiceImpl: AuthServiceServer = {
           issuedAtMs: 0,
           signature: "",
         },
+        viewerContext: undefined,
         expiresAt: new Date(claims.exp * 1000),
       });
     } catch {
-      callback(null, { valid: false, context: undefined, expiresAt: undefined });
+      callback(null, { valid: false, context: undefined, viewerContext: undefined, expiresAt: undefined });
     }
   },
 

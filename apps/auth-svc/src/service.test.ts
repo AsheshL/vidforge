@@ -28,7 +28,7 @@ import { signContext } from "@vidforge/svc-auth";
 import { authServiceImpl } from "./service.js";
 import { hashPassword } from "./password.js";
 import { sendViewerInviteEmail } from "./mailer.js";
-import { signViewerActivationToken } from "./jwt.js";
+import { signToken, signViewerActivationToken, signViewerToken } from "./jwt.js";
 
 const staffCtx = signContext({ userId: "admin1", orgId: "org1", roles: ["ADMIN"], traceId: "t1" });
 
@@ -449,6 +449,63 @@ describe("activateViewer", () => {
       callback,
     );
     expect(callback).toHaveBeenCalledWith(null, expect.objectContaining({ token: expect.any(String) }));
+  });
+});
+
+describe("verifyToken — viewer tokens", () => {
+  it("returns a ViewerContext, never a staff context, for a viewer token", async () => {
+    vi.stubEnv("JWT_SECRET", "current-secret");
+    const { token } = await signViewerToken({ sub: "viewer1", org: "org1" });
+    vi.mocked(prisma.viewer.findUnique).mockResolvedValueOnce({
+      id: "viewer1", orgId: "org1", activatedAt: new Date(), revokedAt: null,
+    } as never);
+
+    const callback = vi.fn();
+    await authServiceImpl.verifyToken({ request: { token } } as never, callback);
+
+    expect(callback).toHaveBeenCalledWith(
+      null,
+      expect.objectContaining({ valid: true, context: undefined, viewerContext: { viewerId: "viewer1", orgId: "org1" } }),
+    );
+  });
+
+  it("rejects a viewer token for a viewer that no longer exists", async () => {
+    vi.stubEnv("JWT_SECRET", "current-secret");
+    const { token } = await signViewerToken({ sub: "viewer1", org: "org1" });
+    vi.mocked(prisma.viewer.findUnique).mockResolvedValueOnce(null);
+
+    const callback = vi.fn();
+    await authServiceImpl.verifyToken({ request: { token } } as never, callback);
+
+    expect(callback).toHaveBeenCalledWith(null, expect.objectContaining({ valid: false }));
+  });
+
+  it("rejects an already-issued session token the instant the viewer is revoked — revocation isn't just a login-time check", async () => {
+    vi.stubEnv("JWT_SECRET", "current-secret");
+    const { token } = await signViewerToken({ sub: "viewer1", org: "org1" });
+    vi.mocked(prisma.viewer.findUnique).mockResolvedValueOnce({
+      id: "viewer1", orgId: "org1", activatedAt: new Date("2026-01-01"), revokedAt: new Date("2026-09-28"),
+    } as never);
+
+    const callback = vi.fn();
+    await authServiceImpl.verifyToken({ request: { token } } as never, callback);
+
+    expect(callback).toHaveBeenCalledWith(null, expect.objectContaining({ valid: false }));
+  });
+
+  it("a staff token never resolves to a ViewerContext (cross-contamination guard)", async () => {
+    vi.stubEnv("JWT_SECRET", "current-secret");
+    const { token } = await signToken({ sub: "user1", org: "org1", role: "ADMIN" });
+    vi.mocked(prisma.user.findUnique).mockResolvedValueOnce({
+      id: "user1", orgId: "org1", role: "ADMIN", mustChangePassword: false,
+    } as never);
+
+    const callback = vi.fn();
+    await authServiceImpl.verifyToken({ request: { token } } as never, callback);
+
+    const [, res] = callback.mock.calls[0];
+    expect(res.viewerContext).toBeUndefined();
+    expect(res.context).toBeDefined();
   });
 });
 
