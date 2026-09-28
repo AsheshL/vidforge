@@ -4,6 +4,7 @@ import { prisma } from "@vidforge/db";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { authClient, requireRole } from "../auth.js";
+import { presign } from "./playback.js";
 import { resolveS3Config } from "../s3-config.js";
 
 const ROLE_NUM: Record<string, number> = { VIEWER: 1, EDITOR: 2, ADMIN: 3, OWNER: 4 };
@@ -36,6 +37,19 @@ const identitySchema = z.object({
 // beyond the gateway's ADMIN gate (e.g. "cannot outrank the actor") live
 // in auth-svc next to the data they protect.
 export function registerOrgRoutes(app: FastifyInstance) {
+  app.get("/v1/org", { preHandler: requireRole("ADMIN") }, async (req, reply) => {
+    const org = await prisma.org.findUnique({
+      where: { id: req.authContext!.orgId },
+      select: { name: true, slug: true, displayName: true, logoStorageKey: true },
+    });
+    return reply.send({
+      name: org!.name,
+      slug: org!.slug,
+      displayName: org!.displayName,
+      logoUrl: org!.logoStorageKey ? await presign(org!.logoStorageKey) : null,
+    });
+  });
+
   app.get("/v1/org/members", { preHandler: requireRole("ADMIN") }, async (req, reply) => {
     return new Promise((resolve) => {
       authClient.listOrgMembers(

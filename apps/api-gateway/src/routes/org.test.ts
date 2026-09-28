@@ -3,12 +3,16 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@vidforge/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@vidforge/db")>();
-  return { ...actual, prisma: { ...actual.prisma, org: { update: vi.fn() } } };
+  return { ...actual, prisma: { ...actual.prisma, org: { update: vi.fn(), findUnique: vi.fn() } } };
 });
 
 vi.mock("@aws-sdk/client-s3", () => ({
   S3Client: vi.fn().mockImplementation(() => ({ send: vi.fn().mockResolvedValue({}) })),
   PutObjectCommand: vi.fn(),
+}));
+
+vi.mock("./playback.js", () => ({
+  presign: vi.fn().mockResolvedValue("https://signed.example/logo.png"),
 }));
 
 vi.mock("../auth.js", () => ({
@@ -22,6 +26,7 @@ vi.mock("../auth.js", () => ({
 
 import { prisma } from "@vidforge/db";
 import { authClient } from "../auth.js";
+import { presign } from "./playback.js";
 import { registerOrgRoutes } from "./org.js";
 
 function buildApp() {
@@ -64,5 +69,29 @@ describe("PATCH /v1/org", () => {
       method: "PATCH", url: "/v1/org", payload: { logoDataUri: `data:image/png;base64,${bigBase64}` },
     });
     expect(res.statusCode).toBe(400);
+  });
+});
+
+describe("GET /v1/org", () => {
+  it("returns the org's current identity, presigning the logo if set", async () => {
+    vi.mocked(prisma.org.findUnique).mockResolvedValueOnce({
+      name: "Acme Inc", slug: "acme-inc", displayName: "Acme Streaming", logoStorageKey: "org-logos/org-1-abc.png",
+    } as never);
+    const app = buildApp();
+    const res = await app.inject({ method: "GET", url: "/v1/org" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      name: "Acme Inc", slug: "acme-inc", displayName: "Acme Streaming", logoUrl: "https://signed.example/logo.png",
+    });
+    expect(presign).toHaveBeenCalledWith("org-logos/org-1-abc.png");
+  });
+
+  it("returns a null logoUrl when no logo is set", async () => {
+    vi.mocked(prisma.org.findUnique).mockResolvedValueOnce({
+      name: "Acme Inc", slug: "acme-inc", displayName: null, logoStorageKey: null,
+    } as never);
+    const app = buildApp();
+    const res = await app.inject({ method: "GET", url: "/v1/org" });
+    expect(res.json()).toEqual({ name: "Acme Inc", slug: "acme-inc", displayName: null, logoUrl: null });
   });
 });
