@@ -105,3 +105,10 @@ export interface Viewer {
   activatedAt?: string;
   revokedAt?: string;
 }
+
+export interface OrgIdentity {
+  name: string;
+  slug: string;
+  displayName: string | null;
+  logoUrl: string | null;
+}

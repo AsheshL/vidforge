@@ -3,6 +3,7 @@ import { OrgPanel } from "@/components/OrgPanel";
 import { ApiKeysPanel } from "@/components/ApiKeysPanel";
 import { WebhooksPanel } from "@/components/WebhooksPanel";
 import { ViewersPanel } from "@/components/ViewersPanel";
+import { OrgBrandingPanel } from "@/components/OrgBrandingPanel";
 
 export default function OrgPage() {
   return (
@@ -35,6 +36,7 @@ export default function OrgPage() {
       </section>
       <section className="flex flex-col gap-3">
         <h2 className="text-xl font-semibold tracking-tight">Viewer portal</h2>
+        <OrgBrandingPanel />
         <ViewersPanel />
       </section>
     </main>
