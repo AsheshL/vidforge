@@ -96,3 +96,12 @@ export interface PageInfo {
   nextPageToken: string;
   totalCount: number;
 }
+
+export interface Viewer {
+  viewerId: string;
+  orgId: string;
+  email: string;
+  invitedAt: string;
+  activatedAt?: string;
+  revokedAt?: string;
+}

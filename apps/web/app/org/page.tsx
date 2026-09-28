@@ -2,6 +2,7 @@ import Link from "next/link";
 import { OrgPanel } from "@/components/OrgPanel";
 import { ApiKeysPanel } from "@/components/ApiKeysPanel";
 import { WebhooksPanel } from "@/components/WebhooksPanel";
+import { ViewersPanel } from "@/components/ViewersPanel";
 
 export default function OrgPage() {
   return (
@@ -31,6 +32,10 @@ export default function OrgPage() {
       <section className="flex flex-col gap-3">
         <h2 className="text-xl font-semibold tracking-tight">Webhooks</h2>
         <WebhooksPanel />
+      </section>
+      <section className="flex flex-col gap-3">
+        <h2 className="text-xl font-semibold tracking-tight">Viewer portal</h2>
+        <ViewersPanel />
       </section>
     </main>
   );
