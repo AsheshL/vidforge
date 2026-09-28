@@ -117,6 +117,7 @@ These are the things that differ from dev and will bite if missed:
 Interactive architecture and sequence diagrams (source specs in
 [docs/diagrams](docs/diagrams)):
 
+- [AWS — High-Level Architecture](https://asheshl.github.io/vidforge/aws/architecture.html) (Terraform target, not necessarily live — see [docs/diagrams/aws](docs/diagrams/aws))
 - [Viewer Portal — System Architecture](https://asheshl.github.io/vidforge/viewer-portal/architecture.html)
 - [Viewer Portal — Invite & Activation](https://asheshl.github.io/vidforge/viewer-portal/onboarding-sequence.html)
 - [Viewer Portal — Publish-Gated Playback](https://asheshl.github.io/vidforge/viewer-portal/playback-sequence.html)

@@ -1,0 +1,434 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "VidForge — AWS High-Level Architecture",
+    "output": "aws-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/AsheshL/vidforge",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "c0d3d316101b218a86a75ff8c9deaeff383f0204"
+    },
+    "views": [
+      {
+        "id": "request-path",
+        "label": "Request path",
+        "focus": [
+          "users",
+          "alb",
+          "web",
+          "gateway"
+        ],
+        "note": "Browser traffic enters through the ALB; the dashboard calls the gateway directly, not through a server-side proxy."
+      },
+      {
+        "id": "internal-services",
+        "label": "Internal services",
+        "focus": [
+          "gateway",
+          "authsvc",
+          "videosvc",
+          "worker",
+          "rds",
+          "redis"
+        ],
+        "note": "auth-svc and video-svc are only reachable inside the VPC, via Cloud Map service discovery."
+      },
+      {
+        "id": "media-pipeline",
+        "label": "Media pipeline",
+        "focus": [
+          "worker",
+          "s3",
+          "cloudfront",
+          "users"
+        ],
+        "note": "The worker writes renditions to S3; CloudFront fronts presigned segment URLs for playback."
+      }
+    ],
+    "viewBox": [
+      1180,
+      590
+    ]
+  },
+  "components": [
+    {
+      "id": "users",
+      "type": "external",
+      "label": "Users",
+      "sublabel": "staff & viewers",
+      "pos": [
+        40,
+        280
+      ],
+      "size": [
+        130,
+        60
+      ]
+    },
+    {
+      "id": "cloudfront",
+      "type": "cloud",
+      "label": "CloudFront",
+      "sublabel": "media CDN",
+      "pos": [
+        240,
+        60
+      ],
+      "size": [
+        140,
+        60
+      ],
+      "sources": [
+        {
+          "path": "infra/terraform/cloudfront.tf"
+        }
+      ]
+    },
+    {
+      "id": "s3",
+      "type": "cloud",
+      "label": "S3",
+      "sublabel": "uploads, processed",
+      "pos": [
+        980,
+        60
+      ],
+      "size": [
+        150,
+        60
+      ],
+      "sources": [
+        {
+          "path": "infra/terraform/storage.tf"
+        }
+      ]
+    },
+    {
+      "id": "worker",
+      "type": "backend",
+      "label": "transcode-worker",
+      "sublabel": "ECS, autoscaled",
+      "pos": [
+        700,
+        170
+      ],
+      "size": [
+        150,
+        60
+      ],
+      "sources": [
+        {
+          "path": "infra/terraform/ecs-video.tf"
+        }
+      ]
+    },
+    {
+      "id": "redis",
+      "type": "database",
+      "label": "ElastiCache",
+      "sublabel": "Redis",
+      "pos": [
+        980,
+        170
+      ],
+      "size": [
+        150,
+        60
+      ],
+      "sources": [
+        {
+          "path": "infra/terraform/cache.tf"
+        }
+      ]
+    },
+    {
+      "id": "web",
+      "type": "frontend",
+      "label": "web",
+      "sublabel": "ECS Fargate",
+      "pos": [
+        420,
+        280
+      ],
+      "size": [
+        130,
+        60
+      ],
+      "sources": [
+        {
+          "path": "infra/terraform/ecs-web.tf"
+        }
+      ]
+    },
+    {
+      "id": "videosvc",
+      "type": "backend",
+      "label": "video-svc",
+      "sublabel": "ECS, internal",
+      "pos": [
+        700,
+        280
+      ],
+      "size": [
+        130,
+        60
+      ],
+      "sources": [
+        {
+          "path": "infra/terraform/ecs-video.tf"
+        }
+      ]
+    },
+    {
+      "id": "alb",
+      "type": "cloud",
+      "label": "ALB",
+      "sublabel": "HTTPS :443",
+      "pos": [
+        240,
+        390
+      ],
+      "size": [
+        140,
+        60
+      ],
+      "sources": [
+        {
+          "path": "infra/terraform/alb.tf"
+        }
+      ]
+    },
+    {
+      "id": "gateway",
+      "type": "backend",
+      "label": "api-gateway",
+      "sublabel": "ECS Fargate",
+      "pos": [
+        520,
+        390
+      ],
+      "size": [
+        130,
+        60
+      ],
+      "sources": [
+        {
+          "path": "infra/terraform/ecs-gateway.tf"
+        }
+      ]
+    },
+    {
+      "id": "rds",
+      "type": "database",
+      "label": "RDS Postgres",
+      "sublabel": "Multi-AZ",
+      "pos": [
+        980,
+        390
+      ],
+      "size": [
+        150,
+        60
+      ],
+      "sources": [
+        {
+          "path": "infra/terraform/database.tf"
+        }
+      ]
+    },
+    {
+      "id": "authsvc",
+      "type": "security",
+      "label": "auth-svc",
+      "sublabel": "ECS, internal",
+      "pos": [
+        700,
+        500
+      ],
+      "size": [
+        130,
+        60
+      ],
+      "sources": [
+        {
+          "path": "infra/terraform/ecs-auth.tf"
+        }
+      ]
+    },
+    {
+      "id": "ses",
+      "type": "cloud",
+      "label": "SES",
+      "sublabel": "email",
+      "pos": [
+        900,
+        500
+      ],
+      "size": [
+        130,
+        60
+      ],
+      "sources": [
+        {
+          "path": "infra/terraform/ses.tf"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "AWS ap-south-1",
+      "wraps": [
+        "cloudfront",
+        "alb",
+        "web",
+        "gateway",
+        "authsvc",
+        "videosvc",
+        "worker",
+        "rds",
+        "redis",
+        "s3",
+        "ses"
+      ],
+      "pad": 30
+    },
+    {
+      "kind": "security-group",
+      "label": "Private subnets — S3/SES reached via VPC endpoints, no NAT",
+      "wraps": [
+        "web",
+        "gateway",
+        "authsvc",
+        "videosvc",
+        "worker",
+        "rds",
+        "redis"
+      ],
+      "pad": 22
+    }
+  ],
+  "connections": [
+    {
+      "id": "users-to-alb",
+      "from": "users",
+      "to": "alb",
+      "label": "HTTPS",
+      "variant": "emphasis"
+    },
+    {
+      "id": "users-to-cloudfront",
+      "from": "users",
+      "to": "cloudfront",
+      "label": "media playback"
+    },
+    {
+      "id": "cloudfront-to-s3",
+      "from": "cloudfront",
+      "to": "s3",
+      "label": "presigned origin fetch"
+    },
+    {
+      "id": "alb-to-web",
+      "from": "alb",
+      "to": "web"
+    },
+    {
+      "id": "alb-to-gateway",
+      "from": "alb",
+      "to": "gateway"
+    },
+    {
+      "id": "gateway-to-authsvc",
+      "from": "gateway",
+      "to": "authsvc",
+      "label": "gRPC, Cloud Map",
+      "variant": "security"
+    },
+    {
+      "id": "gateway-to-videosvc",
+      "from": "gateway",
+      "to": "videosvc",
+      "label": "gRPC"
+    },
+    {
+      "id": "gateway-to-rds",
+      "from": "gateway",
+      "to": "rds",
+      "label": "assets, portal",
+      "labelAt": [
+        900,
+        350
+      ]
+    },
+    {
+      "id": "authsvc-to-rds",
+      "from": "authsvc",
+      "to": "rds",
+      "label": "users, viewers"
+    },
+    {
+      "id": "worker-to-redis",
+      "from": "worker",
+      "to": "redis",
+      "label": "BullMQ dequeue",
+      "variant": "dashed",
+      "labelAt": [
+        760,
+        244
+      ]
+    },
+    {
+      "id": "worker-to-s3",
+      "from": "worker",
+      "to": "s3",
+      "label": "renditions",
+      "labelAt": [
+        820,
+        140
+      ]
+    },
+    {
+      "id": "authsvc-to-ses",
+      "from": "authsvc",
+      "to": "ses",
+      "label": "invite / activation email",
+      "variant": "dashed",
+      "labelAt": [
+        950,
+        470
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Managed, not hand-built",
+      "items": [
+        "Every resource here is Terraform (infra/terraform/)",
+        "CI deploys via GitHub OIDC to a repo-scoped IAM role — no long-lived AWS keys",
+        "Rate-limit counters live in Redis too, shared fleet-wide across gateway replicas"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Private by default",
+      "items": [
+        "ECS, RDS, and ElastiCache sit in private subnets",
+        "S3 is reached via a VPC gateway endpoint, so transcode traffic skips the NAT"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "This is the IaC target, not necessarily live",
+      "items": [
+        "The AWS footprint was torn down 2026-09-25 after the feature freeze",
+        "Verify live resources before assuming anything here is actually running"
+      ]
+    }
+  ]
+}
