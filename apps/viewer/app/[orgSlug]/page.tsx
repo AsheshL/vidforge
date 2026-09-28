@@ -54,32 +54,55 @@ export default function LibraryPage() {
   const [progress, setProgress] = useState<ProgressEntry[]>([]);
   const [pageInfo, setPageInfo] = useState<PageInfo>({ nextPageToken: "", totalCount: 0 });
   const [q, setQ] = useState("");
+  const [debouncedQ, setDebouncedQ] = useState("");
   const [loadingMore, setLoadingMore] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
-  const refresh = useCallback(
-    async (query: string) => {
+  // Debounce the search box so typing doesn't fire a library fetch on every
+  // keystroke (Finding 4) — the input itself stays bound to `q` so it feels
+  // responsive; only the API call waits for typing to pause.
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQ(q), 300);
+    return () => clearTimeout(timer);
+  }, [q]);
+
+  // Progress doesn't depend on the search query, so it's fetched once on
+  // mount rather than on every debounced search (Finding 4).
+  const refreshProgress = useCallback(async () => {
+    const res = await portalFetch(orgSlug, `/v1/portal/progress`);
+    if (res.ok) {
+      setProgress((await res.json()).progress ?? []);
+    }
+  }, [orgSlug]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
       if (!getToken(orgSlug)) {
         window.location.href = `/${orgSlug}/login`;
         return;
       }
-      const params = new URLSearchParams({ pageSize: "24", ...(query ? { q: query } : {}) });
-      const [libRes, progRes] = await Promise.all([
-        portalFetch(orgSlug, `/v1/portal/library?${params}`),
-        portalFetch(orgSlug, `/v1/portal/progress`),
-      ]);
-      if (libRes.ok) {
-        const data = await libRes.json();
-        setAssets(data.assets ?? []);
-        setPageInfo(data.pageInfo ?? { nextPageToken: "", totalCount: 0 });
+      const params = new URLSearchParams({ pageSize: "24", ...(debouncedQ ? { q: debouncedQ } : {}) });
+      try {
+        const res = await portalFetch(orgSlug, `/v1/portal/library?${params}`);
+        if (cancelled) return;
+        if (res.ok) {
+          const data = await res.json();
+          setAssets(data.assets ?? []);
+          setPageInfo(data.pageInfo ?? { nextPageToken: "", totalCount: 0 });
+        }
+      } finally {
+        if (!cancelled) setLoaded(true);
       }
-      if (progRes.ok) {
-        setProgress((await progRes.json()).progress ?? []);
-      }
-    },
-    [orgSlug],
-  );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [orgSlug, debouncedQ]);
 
-  useEffect(() => void refresh(q), [refresh, q]);
+  useEffect(() => {
+    void refreshProgress();
+  }, [refreshProgress]);
 
   async function loadMore() {
     if (!pageInfo.nextPageToken || loadingMore) return;
@@ -135,7 +158,9 @@ export default function LibraryPage() {
             </span>
           )}
         </h2>
-        {assets.length === 0 ? (
+        {!loaded ? (
+          <p className="text-sm text-slate-500">Loading…</p>
+        ) : assets.length === 0 ? (
           <p className="text-sm text-slate-500">Nothing here yet.</p>
         ) : (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
