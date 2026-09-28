@@ -10,6 +10,7 @@ vi.mock("@vidforge/db", async (importOriginal) => {
       org: { findUnique: vi.fn() },
       asset: { findMany: vi.fn(), count: vi.fn(), findFirst: vi.fn() },
       transcodeJob: { findFirst: vi.fn() },
+      watchProgress: { findMany: vi.fn(), upsert: vi.fn() },
     },
   };
 });
@@ -116,5 +117,47 @@ describe("GET /v1/portal/jobs/:jobId/hls/*", () => {
     const app = buildApp();
     const res = await app.inject({ method: "GET", url: "/v1/portal/jobs/job1/hls/master.m3u8" });
     expect(res.statusCode).toBe(404);
+  });
+});
+
+describe("PUT /v1/portal/progress/:assetId", () => {
+  it("404s for an asset outside the viewer's org", async () => {
+    vi.mocked(prisma.asset.findFirst).mockResolvedValueOnce(null);
+    const app = buildApp();
+    const res = await app.inject({
+      method: "PUT", url: "/v1/portal/progress/a1", payload: { positionSeconds: 42 },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("upserts progress keyed by viewer and asset", async () => {
+    vi.mocked(prisma.asset.findFirst).mockResolvedValueOnce({ id: "a1", orgId: "org1" } as never);
+    vi.mocked(prisma.watchProgress.upsert).mockResolvedValueOnce({
+      viewerId: "v1", assetId: "a1", positionSeconds: 42, updatedAt: new Date(),
+    } as never);
+    const app = buildApp();
+    const res = await app.inject({
+      method: "PUT", url: "/v1/portal/progress/a1", payload: { positionSeconds: 42 },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(prisma.watchProgress.upsert).toHaveBeenCalledWith({
+      where: { viewerId_assetId: { viewerId: "v1", assetId: "a1" } },
+      create: { viewerId: "v1", assetId: "a1", positionSeconds: 42 },
+      update: { positionSeconds: 42 },
+    });
+  });
+});
+
+describe("GET /v1/portal/history", () => {
+  it("marks unpublished assets as unavailable but still lists them", async () => {
+    vi.mocked(prisma.watchProgress.findMany).mockResolvedValueOnce([
+      {
+        assetId: "a1", positionSeconds: 10, updatedAt: new Date(),
+        asset: { title: "Gone", publishedAt: null, jobs: [] },
+      },
+    ] as never);
+    const app = buildApp();
+    const res = await app.inject({ method: "GET", url: "/v1/portal/history" });
+    expect(res.json()).toMatchObject({ history: [expect.objectContaining({ available: false })] });
   });
 });

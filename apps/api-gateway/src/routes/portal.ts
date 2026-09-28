@@ -145,4 +145,56 @@ export function registerPortalRoutes(app: FastifyInstance, videoClient: VideoSer
     const thumbnails = await fetchThumbnailUrls(videoClient, context, jobId);
     return reply.send({ thumbnails });
   });
+
+  app.get("/v1/portal/progress", { preHandler: requireViewer() }, async (req, reply) => {
+    const rows = await prisma.watchProgress.findMany({
+      where: { viewerId: req.viewerContext!.viewerId },
+      orderBy: { updatedAt: "desc" },
+    });
+    return reply.send({
+      progress: rows.map((r) => ({ assetId: r.assetId, positionSeconds: r.positionSeconds, updatedAt: r.updatedAt })),
+    });
+  });
+
+  const progressSchema = z.object({ positionSeconds: z.number().min(0) });
+
+  app.put("/v1/portal/progress/:assetId", { preHandler: requireViewer() }, async (req, reply) => {
+    const { assetId } = req.params as { assetId: string };
+    const parsed = progressSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const viewer = req.viewerContext!;
+    const asset = await prisma.asset.findFirst({ where: { id: assetId, orgId: viewer.orgId } });
+    if (!asset) return reply.code(404).send({ error: "no such asset" });
+    const row = await prisma.watchProgress.upsert({
+      where: { viewerId_assetId: { viewerId: viewer.viewerId, assetId } },
+      create: { viewerId: viewer.viewerId, assetId, positionSeconds: parsed.data.positionSeconds },
+      update: { positionSeconds: parsed.data.positionSeconds },
+    });
+    return reply.send({ assetId: row.assetId, positionSeconds: row.positionSeconds, updatedAt: row.updatedAt });
+  });
+
+  app.get("/v1/portal/history", { preHandler: requireViewer() }, async (req, reply) => {
+    const rows = await prisma.watchProgress.findMany({
+      where: { viewerId: req.viewerContext!.viewerId },
+      orderBy: { updatedAt: "desc" },
+      include: {
+        asset: {
+          select: {
+            title: true, publishedAt: true,
+            jobs: { where: { state: "COMPLETED" }, orderBy: { finishedAt: "desc" }, take: 1, select: { id: true } },
+          },
+        },
+      },
+    });
+    return reply.send({
+      history: rows.map((r) => ({
+        assetId: r.assetId,
+        title: r.asset.title,
+        positionSeconds: r.positionSeconds,
+        updatedAt: r.updatedAt,
+        available: r.asset.publishedAt !== null,
+        latestCompletedJobId: r.asset.jobs[0]?.id ?? null,
+      })),
+    });
+  });
 }
