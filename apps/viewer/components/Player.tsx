@@ -82,7 +82,7 @@ export function Player({
     return () => hls.destroy();
   }, [orgSlug, jobId, startPositionSeconds]);
 
-  function reportProgress(positionSeconds: number, forced = false) {
+  function reportProgress(positionSeconds: number, forced = false, keepalive = false) {
     const now = Date.now();
     if (!shouldReportProgress(lastReportRef.current, { atMs: now, forced }, PROGRESS_THRESHOLD_SECONDS)) return;
     lastReportRef.current = { atMs: now };
@@ -90,8 +90,38 @@ export function Player({
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ positionSeconds }),
+      // keepalive lets this PUT survive the page unload that's about to
+      // happen — a bare fetch() gets cancelled mid-flight when the tab
+      // closes or navigates away (Finding 1).
+      ...(keepalive ? { keepalive: true } : {}),
     });
   }
+
+  // Most real viewing sessions end with a tab close or navigation, not a
+  // click on the pause button — `pause` isn't reliably fired on unload.
+  // `pagehide` is the more reliable unload signal (works with bfcache,
+  // fires on mobile Safari); `visibilitychange` catches the remaining
+  // cases (e.g. some mobile app-switches) where `pagehide` doesn't fire.
+  // Both call reportProgress with forced:true, which always reports, so
+  // double-firing in edge cases just means two identical, harmless PUTs
+  // (the endpoint is an idempotent upsert on position).
+  useEffect(() => {
+    function flush() {
+      const video = videoRef.current;
+      if (!video) return;
+      reportProgress(video.currentTime, true, true);
+    }
+    function onVisibilityChange() {
+      if (document.visibilityState === "hidden") flush();
+    }
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgSlug, assetId]);
 
   function selectLevel(value: number) {
     setLevel(value);
