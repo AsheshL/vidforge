@@ -4,12 +4,13 @@ import { Role, type AuthServiceServer, type User as ProtoUser } from "@vidforge/
 import type { RequestContext } from "@vidforge/proto/common";
 import { verifyContext } from "@vidforge/svc-auth";
 import { randomBytes, randomUUID } from "node:crypto";
-import { signToken, verifyJwt } from "./jwt.js";
+import { signToken, signViewerActivationToken, verifyJwt } from "./jwt.js";
 import { hashPassword, verifyPassword } from "./password.js";
-import { sendInviteEmail } from "./mailer.js";
+import { sendInviteEmail, sendViewerInviteEmail } from "./mailer.js";
 
 const TEMP_PASSWORD_TTL_HOURS = Number(process.env.TEMP_PASSWORD_TTL_HOURS ?? 24);
 const WEB_URL = process.env.WEB_ORIGIN ?? "http://localhost:3000";
+const VIEWER_URL = process.env.VIEWER_ORIGIN ?? "http://localhost:3001";
 
 const ROLE_RANK: Record<string, number> = { VIEWER: 1, EDITOR: 2, ADMIN: 3, OWNER: 4 };
 
@@ -69,6 +70,22 @@ function toProtoUser(u: {
     orgId: u.orgId,
     role: ROLE_MAP[u.role],
     audit: { createdAt: u.createdAt, updatedAt: u.updatedAt, createdBy: "" },
+  };
+}
+
+function toProtoViewer(v: {
+  id: string;
+  orgId: string;
+  email: string;
+  invitedAt: Date;
+  activatedAt: Date | null;
+}) {
+  return {
+    viewerId: v.id,
+    orgId: v.orgId,
+    email: v.email,
+    invitedAt: v.invitedAt,
+    activatedAt: v.activatedAt ?? undefined,
   };
 }
 
@@ -393,6 +410,89 @@ export const authServiceImpl: AuthServiceServer = {
       },
     });
     callback(null, toProtoUser(updated));
+  },
+
+  inviteViewer: async (call, callback) => {
+    const ctx = authenticate(call.request.context);
+    if (ctx instanceof Error) return callback(ctx);
+    const inviterRank = Math.max(...ctx.roles.map((r) => ROLE_RANK[r] ?? 0), 0);
+    if (inviterRank < ROLE_RANK.ADMIN) {
+      return callback(grpcError(status.PERMISSION_DENIED, "only admins can invite viewers"));
+    }
+    const { email } = call.request;
+    if (!email.includes("@")) {
+      return callback(grpcError(status.INVALID_ARGUMENT, "valid email required"));
+    }
+
+    const existing = await prisma.viewer.findUnique({ where: { orgId_email: { orgId: ctx.orgId, email } } });
+    if (existing?.activatedAt) {
+      return callback(grpcError(status.ALREADY_EXISTS, "this viewer has already activated their account"));
+    }
+    const viewer = existing
+      ? await prisma.viewer.update({ where: { id: existing.id }, data: { invitedAt: new Date(), revokedAt: null } })
+      : await prisma.viewer.create({ data: { orgId: ctx.orgId, email } });
+
+    const { token, expiresAt } = await signViewerActivationToken({ sub: viewer.id });
+    const [org, inviter] = await Promise.all([
+      prisma.org.findUnique({ where: { id: ctx.orgId } }),
+      prisma.user.findUnique({ where: { id: ctx.userId } }),
+    ]);
+    try {
+      await sendViewerInviteEmail({
+        to: email,
+        orgName: org?.displayName || org?.name || "your library",
+        inviterName: inviter?.displayName ?? "An admin",
+        activationUrl: `${VIEWER_URL}/${org?.slug ?? ""}/activate/${token}`,
+        expiresAt,
+      });
+    } catch (err) {
+      return callback(grpcError(status.INTERNAL, `failed to send invite email: ${(err as Error).message}`));
+    }
+    await prisma.auditEvent.create({
+      data: {
+        orgId: ctx.orgId, actorUserId: ctx.userId, action: existing ? "viewer.reinvite" : "viewer.invite",
+        resourceType: "viewer", resourceId: viewer.id,
+      },
+    });
+    callback(null, toProtoViewer(viewer));
+  },
+
+  listViewers: async (call, callback) => {
+    const ctx = authenticate(call.request.context);
+    if (ctx instanceof Error) return callback(ctx);
+    const pageSize = Math.min(Math.max(call.request.page?.pageSize || 50, 1), 100);
+    const pageToken = call.request.page?.pageToken || undefined;
+    const [viewers, totalCount] = await Promise.all([
+      prisma.viewer.findMany({
+        where: { orgId: ctx.orgId },
+        orderBy: [{ invitedAt: "desc" }, { id: "desc" }],
+        take: pageSize,
+        ...(pageToken ? { cursor: { id: pageToken }, skip: 1 } : {}),
+      }),
+      prisma.viewer.count({ where: { orgId: ctx.orgId } }),
+    ]);
+    callback(null, {
+      viewers: viewers.map(toProtoViewer),
+      pageInfo: {
+        nextPageToken: viewers.length === pageSize ? viewers[viewers.length - 1].id : "",
+        totalCount,
+      },
+    });
+  },
+
+  revokeViewer: async (call, callback) => {
+    const ctx = authenticate(call.request.context);
+    if (ctx instanceof Error) return callback(ctx);
+    const inviterRank = Math.max(...ctx.roles.map((r) => ROLE_RANK[r] ?? 0), 0);
+    if (inviterRank < ROLE_RANK.ADMIN) {
+      return callback(grpcError(status.PERMISSION_DENIED, "only admins can revoke viewers"));
+    }
+    const viewer = await prisma.viewer.findUnique({ where: { id: call.request.viewerId } });
+    if (!viewer || viewer.orgId !== ctx.orgId) {
+      return callback(grpcError(status.NOT_FOUND, "no such viewer"));
+    }
+    await prisma.viewer.update({ where: { id: viewer.id }, data: { revokedAt: new Date() } });
+    callback(null, { revoked: true });
   },
 
   recordAuditEvent: async (call, callback) => {

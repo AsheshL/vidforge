@@ -99,3 +99,27 @@ export async function sendInviteEmail(opts: {
     ].join("\n"),
   });
 }
+
+export async function sendViewerInviteEmail(opts: {
+  to: string;
+  orgName: string;
+  inviterName: string;
+  activationUrl: string;
+  expiresAt: Date;
+}) {
+  const hours = Math.round((opts.expiresAt.getTime() - Date.now()) / 3_600_000);
+  await getTransport().sendMail({
+    from: FROM,
+    to: opts.to,
+    subject: `You've been invited to watch on ${opts.orgName}`,
+    text: [
+      `Hi,`,
+      ``,
+      `${opts.inviterName} invited you to ${opts.orgName}'s video library.`,
+      ``,
+      `Set up your account: ${opts.activationUrl}`,
+      ``,
+      `This link expires in ${hours} hours. If it lapses, ask them to invite you again.`,
+    ].join("\n"),
+  });
+}
