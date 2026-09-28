@@ -32,14 +32,18 @@ enum JobState {
 }
 
 model Org {
-  id        String   @id @default(cuid())
-  name      String
-  createdAt DateTime @default(now())
-  users     User[]
-  assets    Asset[]
-  apiKeys   ApiKey[]
-  webhooks  Webhook[]
-  auditLog  AuditEvent[]
+  id             String       @id @default(cuid())
+  name           String
+  slug           String       @unique
+  displayName    String?
+  logoStorageKey String?
+  createdAt      DateTime     @default(now())
+  users          User[]
+  assets         Asset[]
+  apiKeys        ApiKey[]
+  webhooks       Webhook[]
+  auditLog       AuditEvent[]
+  viewers        Viewer[]
 }
 
 model User {
@@ -92,12 +96,14 @@ model Asset {
   tags             String[]
   playbackUrl      String?
   thumbnailUrl     String?
+  publishedAt      DateTime?
   version          Int            @default(1)
   createdBy        String
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
   jobs             TranscodeJob[]
   collections      CollectionAsset[]
+  watchProgress    WatchProgress[]
 
   @@index([orgId, status])
   @@index([orgId, createdAt])
@@ -172,4 +178,32 @@ model AuditEvent {
 
   @@index([orgId, occurredAt])
   @@index([orgId, resourceType])
+}
+
+model Viewer {
+  id            String          @id @default(cuid())
+  orgId         String
+  org           Org             @relation(fields: [orgId], references: [id])
+  email         String
+  passwordHash  String?
+  invitedAt     DateTime        @default(now())
+  activatedAt   DateTime?
+  revokedAt     DateTime?
+  createdAt     DateTime        @default(now())
+  watchProgress WatchProgress[]
+
+  @@unique([orgId, email])
+  @@index([orgId])
+}
+
+model WatchProgress {
+  viewerId        String
+  viewer          Viewer   @relation(fields: [viewerId], references: [id])
+  assetId         String
+  asset           Asset    @relation(fields: [assetId], references: [id])
+  positionSeconds Float
+  updatedAt       DateTime @updatedAt
+
+  @@id([viewerId, assetId])
+  @@index([viewerId, updatedAt])
 }

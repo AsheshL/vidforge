@@ -8,8 +8,10 @@ vi.mock("@vidforge/db", async (importOriginal) => {
     prisma: {
       ...actual.prisma,
       user: { findUnique: vi.fn() },
+      org: { findUnique: vi.fn() },
       apiKey: { create: vi.fn(), update: vi.fn(), findUnique: vi.fn(), findMany: vi.fn() },
       auditEvent: { create: vi.fn() },
+      $transaction: vi.fn(),
     },
   };
 });
@@ -46,6 +48,32 @@ describe("signUp", () => {
     expect(callback).toHaveBeenCalledTimes(1);
     const [err] = callback.mock.calls[0];
     expect(err).toMatchObject({ code: status.INTERNAL });
+  });
+});
+
+describe("signUp org slug", () => {
+  it("derives a url-safe slug from the org name", async () => {
+    vi.mocked(prisma.user.findUnique).mockResolvedValueOnce(null);
+    vi.mocked(prisma.org.findUnique).mockResolvedValueOnce(null); // no collision
+    vi.mocked(prisma.$transaction).mockImplementationOnce(async (fn) =>
+      fn({
+        org: { create: vi.fn().mockResolvedValue({ id: "org1", slug: "acme-inc" }) },
+        user: {
+          create: vi.fn().mockResolvedValue({
+            id: "u1", email: "a@b.com", displayName: "A", orgId: "org1", role: "OWNER",
+          }),
+        },
+      } as never),
+    );
+
+    const callback = vi.fn();
+    const call = {
+      request: { email: "a@b.com", password: "smoketestpassword123", displayName: "A", orgName: "Acme, Inc!" },
+    } as Parameters<typeof authServiceImpl.signUp>[0];
+
+    await authServiceImpl.signUp(call, callback);
+
+    expect(callback).toHaveBeenCalledWith(null, expect.objectContaining({ token: expect.any(String) }));
   });
 });
 
