@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "@vidforge/db";
+import { z } from "zod";
 import { requireRole } from "../auth.js";
 
 // Org-scoped asset listing with each asset's latest completed job so the
@@ -48,5 +49,20 @@ export function registerAssetRoutes(app: FastifyInstance) {
         totalCount,
       },
     };
+  });
+
+  const publishSchema = z.object({ published: z.boolean() });
+
+  app.patch("/v1/assets/:id/publish", { preHandler: requireRole("EDITOR") }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const parsed = publishSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const asset = await prisma.asset.findFirst({ where: { id, orgId: req.authContext!.orgId } });
+    if (!asset) return reply.code(404).send({ error: "no such asset" });
+    const updated = await prisma.asset.update({
+      where: { id },
+      data: { publishedAt: parsed.data.published ? new Date() : null },
+    });
+    return reply.send({ assetId: updated.id, publishedAt: updated.publishedAt });
   });
 }

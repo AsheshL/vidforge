@@ -7,7 +7,7 @@ vi.mock("@vidforge/db", async (importOriginal) => {
     ...actual,
     prisma: {
       ...actual.prisma,
-      asset: { findMany: vi.fn(), count: vi.fn() },
+      asset: { findMany: vi.fn(), count: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
     },
   };
 });
@@ -134,5 +134,35 @@ describe("GET /v1/assets", () => {
         latestCompletedJobId: null,
       },
     ]);
+  });
+});
+
+describe("PATCH /v1/assets/:id/publish", () => {
+  it("404s for an asset in a different org", async () => {
+    vi.mocked(prisma.asset.findFirst).mockResolvedValueOnce(null);
+    const app = buildApp();
+    const res = await app.inject({
+      method: "PATCH", url: "/v1/assets/a1/publish", payload: { published: true },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("sets publishedAt when publishing", async () => {
+    vi.mocked(prisma.asset.findFirst).mockResolvedValueOnce({ id: "a1", orgId: "org-1" } as never);
+    vi.mocked(prisma.asset.update).mockResolvedValueOnce({ id: "a1", publishedAt: new Date("2026-09-28") } as never);
+    const app = buildApp();
+    const res = await app.inject({
+      method: "PATCH", url: "/v1/assets/a1/publish", payload: { published: true },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(prisma.asset.update).toHaveBeenCalledWith({ where: { id: "a1" }, data: { publishedAt: expect.any(Date) } });
+  });
+
+  it("clears publishedAt when unpublishing", async () => {
+    vi.mocked(prisma.asset.findFirst).mockResolvedValueOnce({ id: "a1", orgId: "org-1" } as never);
+    vi.mocked(prisma.asset.update).mockResolvedValueOnce({ id: "a1", publishedAt: null } as never);
+    const app = buildApp();
+    await app.inject({ method: "PATCH", url: "/v1/assets/a1/publish", payload: { published: false } });
+    expect(prisma.asset.update).toHaveBeenCalledWith({ where: { id: "a1" }, data: { publishedAt: null } });
   });
 });
