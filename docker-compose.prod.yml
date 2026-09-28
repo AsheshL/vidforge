@@ -22,6 +22,11 @@ x-app-env: &app-env
   CONTEXT_SIGNING_SECRET: prod-compose-signing-secret
   SMTP_URL: smtp://mailpit:1025
   MAIL_FROM: VidForge <no-reply@vidforge.local>
+  # auth-svc builds viewer invite/activation links from this (VIEWER_URL in
+  # apps/auth-svc/src/service.ts). It's also set inline below on api-gateway
+  # for CORS — same value, and Compose's inline `environment:` overrides the
+  # anchor-merged one for that service, so the duplicate is harmless.
+  VIEWER_ORIGIN: http://localhost:3101
 
 services:
   postgres:
@@ -165,6 +170,19 @@ services:
     init: true
     ports:
       - "3100:3000"
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+
+  viewer:
+    build:
+      context: .
+      dockerfile: apps/viewer/Dockerfile
+      args:
+        NEXT_PUBLIC_GATEWAY_URL: http://localhost:4100
+    init: true
+    ports:
+      - "3101:3000"
     depends_on:
       api-gateway:
         condition: service_healthy

@@ -163,6 +163,21 @@ export function AssetsBoard() {
     window.dispatchEvent(new Event("vidforge:jobs-changed"));
   }
 
+  async function togglePublish(asset: Asset) {
+    setError(null);
+    const res = await fetch(`${GATEWAY_URL}/v1/assets/${asset.assetId}/publish`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ published: !asset.publishedAt }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setError(typeof body?.error === "string" ? body.error : `publish toggle failed: ${res.status}`);
+      return;
+    }
+    await refresh();
+  }
+
   if (!authed) return null;
 
   return (
@@ -214,6 +229,7 @@ export function AssetsBoard() {
               <th className="px-4 py-2.5 font-medium">Preview</th>
               <th className="px-4 py-2.5 font-medium">Title</th>
               <th className="px-4 py-2.5 font-medium">Status</th>
+              <th className="px-4 py-2.5 font-medium">Portal</th>
               <th className="px-4 py-2.5 font-medium">Size</th>
               <th className="px-4 py-2.5 font-medium">Duration</th>
               <th className="px-4 py-2.5 font-medium"></th>
@@ -222,7 +238,7 @@ export function AssetsBoard() {
           <tbody className="divide-y divide-slate-800">
             {assets.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-slate-500">
+                <td colSpan={7} className="px-4 py-6 text-center text-slate-500">
                   No assets yet{canEdit ? " — upload a video to get started." : "."}
                 </td>
               </tr>
@@ -238,6 +254,24 @@ export function AssetsBoard() {
                 </td>
                 <td className="max-w-64 truncate px-4 py-3 text-slate-200">{a.title}</td>
                 <td className={`px-4 py-3 font-medium ${STATUS_COLORS[a.status]}`}>{a.status}</td>
+                <td className="px-4 py-3">
+                  {canEdit ? (
+                    <button
+                      onClick={() => void togglePublish(a)}
+                      className={`rounded px-2 py-1 text-xs font-medium ${
+                        a.publishedAt
+                          ? "bg-emerald-950 text-emerald-400 hover:bg-emerald-900"
+                          : "bg-slate-800 text-slate-400 hover:bg-slate-700"
+                      }`}
+                    >
+                      {a.publishedAt ? "Published" : "Unpublished"}
+                    </button>
+                  ) : (
+                    <span className={`text-xs ${a.publishedAt ? "text-emerald-400" : "text-slate-500"}`}>
+                      {a.publishedAt ? "Published" : "Unpublished"}
+                    </span>
+                  )}
+                </td>
                 <td className="px-4 py-3 text-xs text-slate-400">{formatBytes(a.sourceBytes)}</td>
                 <td className="px-4 py-3 text-xs text-slate-400">
                   {a.durationSeconds ? `${Math.round(a.durationSeconds)}s` : "—"}
