@@ -35,7 +35,7 @@ async function main() {
     const org = await prisma.org.upsert({
       where: { id: orgId },
       update: {},
-      create: { id: orgId, name },
+      create: { id: orgId, name, slug: orgId },
     });
 
     for (const account of accounts) {
