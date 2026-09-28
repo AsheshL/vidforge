@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VidForge diagrams</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      max-width: 720px;
+      margin: 4rem auto;
+      padding: 0 1.5rem;
+      line-height: 1.6;
+    }
+    h1 { font-size: 1.5rem; }
+    .card {
+      display: block;
+      border: 1px solid #8888;
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin: 1rem 0;
+      text-decoration: none;
+      color: inherit;
+    }
+    .card:hover { border-color: #06f; }
+    .card h2 { margin: 0 0 0.25rem; font-size: 1.05rem; }
+    .card p { margin: 0; opacity: 0.75; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>VidForge — Diagrams</h1>
+  <p>Interactive architecture and sequence diagrams. Source: <a href="https://github.com/AsheshL/vidforge/tree/main/docs/diagrams">docs/diagrams</a> on <code>main</code>.</p>
+
+  <a class="card" href="viewer-portal/architecture.html">
+    <h2>Viewer Portal — System Architecture</h2>
+    <p>Staff (apps/web) and customer (apps/viewer) paths through api-gateway, and the structural identity boundary between them.</p>
+  </a>
+  <a class="card" href="viewer-portal/onboarding-sequence.html">
+    <h2>Viewer Portal — Invite &amp; Activation</h2>
+    <p>Invite → email → activate → session.</p>
+  </a>
+  <a class="card" href="viewer-portal/playback-sequence.html">
+    <h2>Viewer Portal — Publish-Gated Playback</h2>
+    <p>Browse → publish-gate check → stream.</p>
+  </a>
+</body>
+</html>
