@@ -17,6 +17,7 @@ import { registerPlaybackRoutes } from "./routes/playback.js";
 import { registerAccountRoutes } from "./routes/account.js";
 import { registerUploadRoutes } from "./routes/uploads.js";
 import { registerAssetRoutes } from "./routes/assets.js";
+import { registerPortalRoutes } from "./routes/portal.js";
 import { registerOrgRoutes } from "./routes/org.js";
 import { registerDevRoutes } from "./routes/dev.js";
 
@@ -64,6 +65,7 @@ registerPlaybackRoutes(app, videoClient);
 registerAccountRoutes(app);
 registerUploadRoutes(app);
 registerAssetRoutes(app);
+registerPortalRoutes(app, videoClient);
 registerOrgRoutes(app);
 registerDevRoutes(app, videoClient);
 
