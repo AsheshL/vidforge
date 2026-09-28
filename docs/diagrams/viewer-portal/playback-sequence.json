@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Publish-Gated Playback",
+    "output": "viewer-playback.sequence.html",
+    "viewBox": [1060, 645],
+    "column_fit": "spread",
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "browse", "label": "Browse", "focus": ["human", "viewerapp", "gateway", "authsvc", "db"], "note": "Every query is scoped by the server-derived orgId, never a client-supplied one." },
+      { "id": "gate", "label": "Publish gate", "focus": ["gateway", "db"], "note": "requirePublishedJob is re-checked on every manifest fetch, not cached from library time." },
+      { "id": "stream", "label": "Stream", "focus": ["gateway", "videosvc", "s3", "viewerapp"], "note": "video-svc is only reached once the publish gate has passed." }
+    ]
+  },
+  "participants": [
+    { "id": "human", "type": "external", "label": "Viewer", "sublabel": "customer" },
+    { "id": "viewerapp", "type": "frontend", "label": "apps/viewer" },
+    { "id": "gateway", "type": "backend", "label": "api-gateway" },
+    { "id": "authsvc", "type": "security", "label": "auth-svc" },
+    { "id": "db", "type": "database", "label": "Postgres" },
+    { "id": "videosvc", "type": "backend", "label": "video-svc" },
+    { "id": "s3", "type": "cloud", "label": "S3" }
+  ],
+  "segments": [
+    { "from": 150, "to": 400, "label": "Browse library" },
+    { "from": 400, "to": 452, "label": "Publish gate re-checked" },
+    { "from": 452, "to": 570, "label": "Stream via video-svc" }
+  ],
+  "messages": [
+    { "id": "human-open", "from": "human", "to": "viewerapp", "y": 160, "label": "open library", "variant": "default" },
+    { "id": "viewerapp-library-get", "from": "viewerapp", "to": "gateway", "y": 188, "label": "GET /v1/portal/library", "variant": "emphasis" },
+    { "id": "gateway-verify", "from": "gateway", "to": "authsvc", "y": 216, "label": "VerifyToken", "variant": "security" },
+    { "id": "authsvc-check-revoked", "from": "authsvc", "to": "db", "y": 244, "label": "check revokedAt / activatedAt", "variant": "default" },
+    { "id": "db-viewer-row", "from": "db", "to": "authsvc", "y": 272, "label": "row", "variant": "return" },
+    { "id": "authsvc-context", "from": "authsvc", "to": "gateway", "y": 300, "label": "ViewerContext", "variant": "return" },
+    { "id": "gateway-assets-query", "from": "gateway", "to": "db", "y": 328, "label": "published, org-scoped assets", "variant": "default" },
+    { "id": "db-assets", "from": "db", "to": "gateway", "y": 356, "label": "assets", "variant": "return" },
+    { "id": "gateway-library", "from": "gateway", "to": "viewerapp", "y": 384, "label": "library", "variant": "return" },
+    { "id": "viewerapp-hls-get", "from": "viewerapp", "to": "gateway", "y": 412, "label": "GET .../hls/master.m3u8", "variant": "emphasis" },
+    { "id": "gateway-require-published", "from": "gateway", "to": "db", "y": 440, "label": "requirePublishedJob — every request", "variant": "security" },
+    { "id": "gateway-manifest-rpc", "from": "gateway", "to": "videosvc", "y": 468, "label": "GetOutputManifest", "variant": "default" },
+    { "id": "videosvc-presign", "from": "videosvc", "to": "s3", "y": 496, "label": "presign segments", "variant": "dashed" },
+    { "id": "videosvc-manifest", "from": "videosvc", "to": "gateway", "y": 524, "label": "manifest", "variant": "return" },
+    { "id": "gateway-playlist", "from": "gateway", "to": "viewerapp", "y": 552, "label": "HLS playlist", "variant": "return" }
+  ],
+  "activations": [
+    { "participant": "viewerapp", "from": 188, "to": 558, "type": "frontend" },
+    { "participant": "gateway", "from": 188, "to": 552, "type": "backend" },
+    { "participant": "authsvc", "from": 216, "to": 304, "type": "security" },
+    { "participant": "videosvc", "from": 468, "to": 528, "type": "backend" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Never trusts the client", "items": ["Every org scope comes from ViewerContext.orgId", "No route reads an orgId from params, query, or body"] },
+    { "dot": "emerald", "title": "Revocation is immediate", "items": ["VerifyToken re-checks the Viewer row on every call", "A revoked session fails on its very next request"] },
+    { "dot": "rose", "title": "Publish gate is per-request", "items": ["requirePublishedJob runs on every hls/thumbnails fetch", "Unpublishing cuts off playback within one manifest refresh"] }
+  ]
+}

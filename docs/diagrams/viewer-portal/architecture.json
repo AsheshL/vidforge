@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "VidForge Viewer Portal — System Architecture",
+    "output": "viewer-portal.architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/AsheshL/vidforge",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "15909935470575847151644b14404ad5480f7b7d"
+    },
+    "views": [
+      { "id": "staff-path", "label": "Staff publishing path", "focus": ["staff", "web", "gateway", "authsvc", "postgres"], "note": "Org staff publish assets and manage viewers from the existing admin dashboard." },
+      { "id": "customer-path", "label": "Customer viewing path", "focus": ["customer", "viewerapp", "gateway", "authsvc", "postgres"], "note": "A structurally separate viewer identity reaches the same gateway and auth-svc." },
+      { "id": "playback-path", "label": "Playback path", "focus": ["gateway", "videosvc", "s3"], "note": "HLS manifests and thumbnails are presigned per request, gated on publish state." }
+    ]
+  },
+  "components": [
+    { "id": "staff", "type": "external", "label": "Org Staff", "sublabel": "admin, editor", "pos": [40, 90], "size": [130, 60] },
+    { "id": "customer", "type": "external", "label": "Org's Customers", "sublabel": "invited viewers", "pos": [40, 360], "size": [130, 60] },
+    { "id": "web", "type": "frontend", "label": "apps/web", "sublabel": "admin dashboard", "pos": [250, 90], "size": [140, 60], "sources": [{ "path": "apps/web/lib/api.ts", "label": "Next.js" }] },
+    { "id": "viewerapp", "type": "frontend", "label": "apps/viewer", "sublabel": "customer portal", "pos": [250, 360], "size": [140, 60], "sources": [{ "path": "apps/viewer/lib/api.ts", "label": "Next.js, per-org" }] },
+    { "id": "gateway", "type": "backend", "label": "api-gateway", "sublabel": "requireRole / requireViewer", "pos": [500, 220], "size": [170, 70], "sources": [{ "path": "apps/api-gateway/src/auth.ts", "label": "structural gate" }] },
+    { "id": "authsvc", "type": "security", "label": "auth-svc", "sublabel": "VerifyToken", "pos": [770, 120], "size": [150, 60], "sources": [{ "path": "apps/auth-svc/src/service.ts", "label": "identity RPCs" }] },
+    { "id": "videosvc", "type": "backend", "label": "video-svc", "sublabel": "GetOutputManifest", "pos": [770, 340], "size": [150, 60] },
+    { "id": "postgres", "type": "database", "label": "Postgres", "sublabel": "Viewer · WatchProgress", "pos": [1010, 120], "size": [170, 60], "sources": [{ "path": "packages/db/prisma/schema.prisma", "label": "schema" }] },
+    { "id": "s3", "type": "cloud", "label": "S3", "sublabel": "HLS segments, thumbnails, logos", "pos": [1010, 340], "size": [170, 60] }
+  ],
+  "boundaries": [
+    { "kind": "security-group", "label": "Structurally incompatible identities: RequestContext vs ViewerContext", "wraps": ["gateway", "authsvc"], "pad": 24 }
+  ],
+  "connections": [
+    { "id": "staff-to-web", "from": "staff", "to": "web", "label": "publish, invite, brand", "variant": "default", "labelAt": [210, 164] },
+    { "id": "customer-to-viewerapp", "from": "customer", "to": "viewerapp", "label": "browse & watch", "variant": "default", "labelAt": [210, 434] },
+    { "id": "web-to-gateway", "from": "web", "to": "gateway", "label": "staff JWT", "variant": "emphasis" },
+    { "id": "viewerapp-to-gateway", "from": "viewerapp", "to": "gateway", "label": "viewer JWT", "variant": "emphasis" },
+    { "id": "gateway-to-authsvc", "from": "gateway", "to": "authsvc", "label": "VerifyToken + viewer/staff RPCs", "variant": "security", "labelAt": [720, 194] },
+    { "id": "authsvc-to-postgres", "from": "authsvc", "to": "postgres", "label": "Org / User / Viewer", "labelAt": [965, 194] },
+    { "id": "gateway-to-videosvc", "from": "gateway", "to": "videosvc", "label": "published + org-scoped only" },
+    { "id": "videosvc-to-s3", "from": "videosvc", "to": "s3", "label": "presigned segments", "labelAt": [965, 414] },
+    { "id": "gateway-to-s3", "from": "gateway", "to": "s3", "label": "presign thumbnails / logo", "variant": "dashed" }
+  ],
+  "cards": [
+    { "dot": "rose", "title": "Identity, not convention", "items": ["Viewer is a separate Prisma model, not a Role value", "A viewer JWT decodes to ViewerContext, never a staff RequestContext", "requireRole and requireViewer each accept only their own shape"] },
+    { "dot": "emerald", "title": "Revocation is immediate", "items": ["VerifyToken re-checks the Viewer row on every call", "A revoked session fails on its next request, not at next login"] },
+    { "dot": "cyan", "title": "Publish gate runs per request", "items": ["video-svc is only reached for published, org-scoped jobs", "Unpublishing cuts off playback within one manifest refresh"] }
+  ]
+}
