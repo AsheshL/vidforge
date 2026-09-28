@@ -34,6 +34,12 @@ service AuthService {
   rpc ListOrgMembers(ListOrgMembersRequest) returns (ListOrgMembersResponse);
   rpc AssignRole(AssignRoleRequest) returns (User);
 
+  rpc InviteViewer(InviteViewerRequest) returns (Viewer);
+  rpc ListViewers(ListViewersRequest) returns (ListViewersResponse);
+  rpc RevokeViewer(RevokeViewerRequest) returns (RevokeViewerResponse);
+  rpc ActivateViewer(ActivateViewerRequest) returns (ViewerSessionResponse);
+  rpc ViewerLogin(ViewerLoginRequest) returns (ViewerSessionResponse);
+
   rpc RecordAuditEvent(RecordAuditEventRequest) returns (RecordAuditEventResponse);
   rpc ListAuditEvents(ListAuditEventsRequest) returns (ListAuditEventsResponse);
 }
@@ -55,6 +61,11 @@ message User {
   vidforge.common.v1.AuditInfo audit = 6;
 }
 
+message ViewerContext {
+  string viewer_id = 1;
+  string org_id = 2;
+}
+
 message VerifyTokenRequest {
   string token = 1; // JWT or API key
 }
@@ -63,6 +74,7 @@ message VerifyTokenResponse {
   bool valid = 1;
   vidforge.common.v1.RequestContext context = 2;
   google.protobuf.Timestamp expires_at = 3;
+  ViewerContext viewer_context = 4;
 }
 
 message SignUpRequest {
@@ -205,4 +217,54 @@ message AuditEvent {
 message ListAuditEventsResponse {
   repeated AuditEvent events = 1;
   vidforge.common.v1.PageInfo page_info = 2;
+}
+
+message Viewer {
+  string viewer_id = 1;
+  string org_id = 2;
+  string email = 3;
+  google.protobuf.Timestamp invited_at = 4;
+  google.protobuf.Timestamp activated_at = 5;
+}
+
+message InviteViewerRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  string email = 2;
+}
+
+message ListViewersRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  vidforge.common.v1.PageRequest page = 2;
+}
+
+message ListViewersResponse {
+  repeated Viewer viewers = 1;
+  vidforge.common.v1.PageInfo page_info = 2;
+}
+
+message RevokeViewerRequest {
+  vidforge.common.v1.RequestContext context = 1;
+  string viewer_id = 2;
+}
+
+message RevokeViewerResponse {
+  bool revoked = 1;
+}
+
+message ActivateViewerRequest {
+  string org_slug = 1;
+  string token = 2;
+  string password = 3;
+}
+
+message ViewerLoginRequest {
+  string org_slug = 1;
+  string email = 2;
+  string password = 3;
+}
+
+message ViewerSessionResponse {
+  string token = 1;
+  Viewer viewer = 2;
+  google.protobuf.Timestamp expires_at = 3;
 }
