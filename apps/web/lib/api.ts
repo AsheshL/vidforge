@@ -77,6 +77,7 @@ export interface Asset {
   durationSeconds: number | null;
   createdBy: string;
   createdAt: string;
+  publishedAt: string | null;
   latestCompletedJobId: string | null;
 }
 
