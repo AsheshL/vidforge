@@ -20,6 +20,7 @@ import { registerAssetRoutes } from "./routes/assets.js";
 import { registerPortalRoutes } from "./routes/portal.js";
 import { registerOrgRoutes } from "./routes/org.js";
 import { registerDevRoutes } from "./routes/dev.js";
+import { registerViewerRoutes } from "./routes/viewers.js";
 
 // Behind a load balancer every request arrives from the proxy, so without
 // trustProxy req.ip is the balancer for all of them and the per-IP limits
@@ -68,6 +69,7 @@ registerAssetRoutes(app);
 registerPortalRoutes(app, videoClient);
 registerOrgRoutes(app);
 registerDevRoutes(app, videoClient);
+registerViewerRoutes(app);
 
 // Keep under the platform's stop timeout (ECS `stopTimeout`, compose
 // `stop_grace_period`) so the process exits before it is SIGKILLed.
